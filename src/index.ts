@@ -43,6 +43,7 @@ import {
 
 interface EdgeOTAConfig {
   serverUrl: string;
+  projectId?: string;
   publicKey: string;
 }
 
@@ -59,7 +60,7 @@ function askQuestion(query: string): Promise<string> {
   });
 }
 
-function updateAppJson(cwd: string, serverUrl: string) {
+function updateAppJson(cwd: string, serverUrl: string, projectId?: string) {
   const appJsonPath = path.resolve(cwd, "app.json");
   if (!fs.existsSync(appJsonPath)) {
     console.log("⚠️   app.json not found in this directory. Skipping auto-update.");
@@ -77,7 +78,9 @@ function updateAppJson(cwd: string, serverUrl: string) {
       data.expo.updates = {};
     }
     
-    const updateUrl = `${serverUrl.replace(/\/$/, "")}/api/updates`;
+    const updateUrl = projectId
+      ? `${serverUrl.replace(/\/$/, "")}/api/projects/${projectId}/updates`
+      : `${serverUrl.replace(/\/$/, "")}/api/updates`;
     data.expo.updates.url = updateUrl;
     
     fs.writeFileSync(appJsonPath, JSON.stringify(data, null, 2), "utf-8");
@@ -235,8 +238,14 @@ program
     "-s, --server <url>",
     "EdgeOTA server URL"
   )
+  .option(
+    "--project <id>",
+    "EdgeOTA Project ID (optional)"
+  )
   .action(async (options) => {
     let serverUrl = options.server;
+    let projectId = options.project;
+
     if (!serverUrl) {
       console.log("ℹ️  Server URL not provided via -s/--server.");
       const answer = await askQuestion(
@@ -253,6 +262,16 @@ program
       }
     }
 
+    if (!projectId && !options.server) {
+      console.log("\nℹ️  Project ID not provided via --project.");
+      const pAnswer = await askQuestion(
+        "Enter your EdgeOTA Project ID (optional, press Enter for single-tenant self-hosted): "
+      );
+      if (pAnswer.trim()) {
+        projectId = pAnswer.trim();
+      }
+    }
+
     // Normalise URL (remove trailing slashes)
     serverUrl = serverUrl.replace(/\/$/, "");
 
@@ -263,6 +282,9 @@ program
       serverUrl: serverUrl,
       publicKey: keys.publicKey
     };
+    if (projectId) {
+      config.projectId = projectId;
+    }
 
     const cwd = process.cwd();
     fs.writeFileSync("edge-ota.config.json", JSON.stringify(config, null, 2));
@@ -282,7 +304,11 @@ program
     }
 
     // Auto-update app.json updates.url
-    updateAppJson(cwd, serverUrl);
+    updateAppJson(cwd, serverUrl, projectId);
+
+    const targetUrlStr = projectId
+      ? `${serverUrl}/api/projects/${projectId}/updates`
+      : `${serverUrl}/api/updates`;
 
     console.log("\n✅  EdgeOTA initialised.");
     console.log("   Config :  edge-ota.config.json");
@@ -292,7 +318,7 @@ program
     console.log(
       "\n💡  Your app.json updates configuration has been configured to:\n" +
         '   "updates": {\n' +
-        '     "url": "' + serverUrl + '/api/updates"\n' +
+        '     "url": "' + targetUrlStr + '"\n' +
         "   }\n" +
       "\n✨  Powered by EdgeOTA — A product of Renbo Studios" +
       "\n🚀  Need scalable app development or custom Cloudflare setup?" +
@@ -315,6 +341,7 @@ program
     "Target platform: ios | android | all",
     "all"
   )
+  .option("--project <id>", "Project ID (optional, overrides config)")
   .option("--skip-export", "Skip expo export (use existing ./dist directory)")
   .option("--dry-run", "Build and sign the payload but do NOT upload")
   .action(async (options) => {
@@ -441,18 +468,25 @@ program
   .description("List recent releases from the EdgeOTA server")
   .option("-t, --token <token>", "Auth token (or set EDGE_OTA_TOKEN env var)")
   .option("-n, --limit <n>", "Number of releases to show", "10")
+  .option("--project <id>", "Project ID (optional)")
   .action(async (options) => {
     const cwd    = process.cwd();
     const config = loadConfig(cwd);
     const token  = options.token || process.env.EDGE_OTA_TOKEN;
+    const projectId = options.project || config.projectId;
 
     if (!token) {
       console.error("❌  Auth token required. Use -t <token> or set EDGE_OTA_TOKEN.");
       process.exit(1);
     }
 
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (projectId) {
+      headers["x-project-id"] = projectId;
+    }
+
     const res = await fetch(`${config.serverUrl}/api/releases`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers
     });
 
     if (!res.ok) {

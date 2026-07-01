@@ -32,16 +32,17 @@ edge-ota status
 
 Generates an ECDSA P-256 key pair, writes `edge-ota.config.json` and `.edge-ota.private.key`, auto-adds the private key to `.gitignore`, and automatically updates your Expo `app.json` configuration file with the new updates URL.
 
-If `-s` or `--server` is not specified, you will be prompted interactively to enter the URL of your hosted or local EdgeOTA server.
+If `--server` is not specified, you will be prompted interactively to enter the URL of your hosted or local EdgeOTA server and your optional Project ID.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-s, --server <url>` | — | Your EdgeOTA server URL (prompts if omitted) |
+| `--project <id>` | — | Your EdgeOTA Project ID (prompts if omitted, optional) |
 
 **Output:**
-- `edge-ota.config.json` — server URL + public key (safe to commit)
+- `edge-ota.config.json` — server URL, public key, and optional project ID (safe to commit)
 - `.edge-ota.private.key` — private signing key (**never commit this**)
-- **Auto-configured:** `app.json` is modified to point `expo.updates.url` to your server's `/api/updates` endpoint.
+- **Auto-configured:** `app.json` is modified to point `expo.updates.url` to your server's updates endpoint. If a Project ID is configured, it points to `/api/projects/:projectId/updates`; otherwise, it falls back to the global `/api/updates` endpoint.
 
 ---
 
@@ -54,6 +55,7 @@ Runs `expo export`, hashes every asset with SHA-256, signs the payload with your
 | `-c, --channel <name>` | `production` | Deployment channel |
 | `-r, --runtime <version>` | `1.0.0` | Native runtime version (must match `runtimeVersion` in app.json) |
 | `-p, --platform <platform>` | `all` | `ios`, `android`, or `all` |
+| `--project <id>` | — | Project ID (overrides value in `edge-ota.config.json`) |
 | `--skip-export` | — | Skip `expo export` — use existing `./dist` |
 | `--dry-run` | — | Sign the payload but don't upload |
 
@@ -75,6 +77,7 @@ Lists recent releases from the server as a table.
 |--------|---------|-------------|
 | `-t, --token <token>` | `$EDGE_OTA_TOKEN` | Auth token from the dashboard |
 | `-n, --limit <n>` | `10` | Number of releases to show |
+| `--project <id>` | — | Project ID to query (overrides config) |
 
 ```bash
 export EDGE_OTA_TOKEN="your-dashboard-token"
