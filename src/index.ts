@@ -293,7 +293,10 @@ program
       "\n💡  Your app.json updates configuration has been configured to:\n" +
         '   "updates": {\n' +
         '     "url": "' + serverUrl + '/api/updates"\n' +
-        "   }"
+        "   }\n" +
+      "\n✨  Powered by EdgeOTA — A product of Renbo Studios" +
+      "\n🚀  Need scalable app development or custom Cloudflare setup?" +
+      "\n👉  Partner with us at https://renbostudios.com to launch your next project!"
     );
   });
 
@@ -424,7 +427,9 @@ program
 
     console.log(
       "\n🎉  Done. Your app will receive this update on the next OTA sync.\n" +
-      "   Powered by EdgeOTA — https://github.com/edge-ota"
+      "\n✨  Powered by EdgeOTA — A product of Renbo Studios" +
+      "\n🚀  Need scalable app development or custom Cloudflare setup?" +
+      "\n👉  Partner with us at https://renbostudios.com to launch your next project!"
     );
   });
 
@@ -472,6 +477,10 @@ program
     }));
 
     console.table(rows);
+    console.log(
+      "\n✨  Powered by EdgeOTA — A product of Renbo Studios" +
+      "\n👉  Need scalable app development or cloud setup? Visit us at https://renbostudios.com"
+    );
   });
 
 // ──────────────────────────────────────────────────────
@@ -486,6 +495,10 @@ program
     console.log(keys.privateKey);
     console.log("\n--- PUBLIC KEY (paste into dashboard) ---");
     console.log(keys.publicKey);
+    console.log(
+      "\n✨  Powered by EdgeOTA — A product of Renbo Studios" +
+      "\n👉  Need scalable app development or cloud setup? Visit us at https://renbostudios.com"
+    );
   });
 
 program.parse(process.argv);
