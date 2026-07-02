@@ -291,16 +291,8 @@ program
 
     if (!serverUrl) {
       console.log(`  ${colors.dim}no --server flag provided${colors.reset}`);
-      const answer = await askQuestion(`  server url [http://localhost:3000]: `);
-      if (!answer) {
-        serverUrl = "http://localhost:3000";
-      } else if (answer.toLowerCase().includes("host")) {
-        console.log(`  ${colors.yellow}hint${colors.reset}  use your hosted EdgeOTA instance (e.g. https://api.edge-ota.renbo.site)`);
-        const hostedAnswer = await askQuestion(`  hosted server url: `);
-        serverUrl = hostedAnswer.trim() || "http://localhost:3000";
-      } else {
-        serverUrl = answer;
-      }
+      const answer = await askQuestion(`  server url [https://api.edge-ota.renbo.site]: `);
+      serverUrl = answer.trim() || "https://api.edge-ota.renbo.site";
     }
 
     if (!projectId && !options.server) {
