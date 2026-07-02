@@ -8,13 +8,20 @@
   "homepage": "https://github.com/renbostudios/edge-ota",
   "repository": {
     "type": "git",
-    "url": "https://github.com/renbostudios/edge-ota.git",
-    "directory": "apps/cli"
+    "url": "https://github.com/renbostudios/edge-ota.git"
   },
   "bugs": {
     "url": "https://github.com/renbostudios/edge-ota/issues"
   },
-  "keywords": ["expo", "ota", "updates", "react-native", "cli", "edge", "cloudflare"],
+  "keywords": [
+    "expo",
+    "ota",
+    "updates",
+    "react-native",
+    "cli",
+    "edge",
+    "cloudflare"
+  ],
   "type": "module",
   "bin": {
     "edge-ota": "./dist/index.js"
