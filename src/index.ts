@@ -169,6 +169,74 @@ try {
   }
 } catch { /* fallback */ }
 
+// ─── Auto Update Check ────────────────────────────────────────────────────────
+
+const UPDATE_CHECK_FILE = path.join(GLOBAL_CONFIG_DIR, "update-check.json");
+
+function isNewerVersion(current: string, latest: string): boolean {
+  const cParts = current.split(".").map(Number);
+  const lParts = latest.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const cNum = cParts[i] || 0;
+    const lNum = lParts[i] || 0;
+    if (lNum > cNum) return true;
+    if (lNum < cNum) return false;
+  }
+  return false;
+}
+
+async function checkAndAutoUpdate() {
+  if (process.env.EDGE_OTA_UPDATING === "true") return;
+
+  try {
+    const now = Date.now();
+    if (fs.existsSync(UPDATE_CHECK_FILE)) {
+      try {
+        const cache = JSON.parse(fs.readFileSync(UPDATE_CHECK_FILE, "utf-8"));
+        // Only check npm once every 15 minutes to keep CLI commands extremely fast
+        if (now - (cache.lastChecked || 0) < 15 * 60 * 1000) {
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Save timestamp immediately to prevent concurrent requests
+    fs.mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(UPDATE_CHECK_FILE, JSON.stringify({ lastChecked: now }));
+
+    // Fetch latest version from registry with a short 1s timeout
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), 1000);
+
+    const res = await fetch("https://registry.npmjs.org/@renbostudios/edge-ota/latest", {
+      signal: controller.signal
+    });
+    clearTimeout(timerId);
+
+    if (!res.ok) return;
+    const data = (await res.json()) as { version: string };
+    const latestVersion = data.version;
+
+    if (latestVersion && isNewerVersion(packageVersion, latestVersion)) {
+      console.log(`\n  ${c.yellow}${c.reset}  New version of ${c.bold}edge-ota${c.reset} available: ${c.green}${latestVersion}${c.reset} (current: ${c.dim}${packageVersion}${c.reset})`);
+      console.log(`  ${c.blue}➜${c.reset}  Auto-updating globally...`);
+
+      try {
+        execSync("npm install -g @renbostudios/edge-ota", {
+          stdio: "inherit",
+          env: { ...process.env, EDGE_OTA_UPDATING: "true" }
+        });
+        console.log(`  ${c.green}✓${c.reset}  Successfully auto-updated to ${c.bold}${latestVersion}${c.reset}!\n`);
+      } catch (err: any) {
+        console.error(`  ${c.red}✗${c.reset}  Auto-update failed: ${err.message}`);
+        console.error(`     Please update manually: ${c.cyan}npm install -g @renbostudios/edge-ota${c.reset}\n`);
+      }
+    }
+  } catch {
+    // Fail silently so CLI works offline
+  }
+}
+
 // ─── Banner ───────────────────────────────────────────────────────────────────
 
 function printBanner() {
@@ -993,4 +1061,5 @@ program
     console.log(keys.publicKey);
   });
 
+await checkAndAutoUpdate();
 program.parse(process.argv);
