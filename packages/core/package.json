@@ -1,0 +1,45 @@
+{
+  "name": "@renbostudios/edge-ota-core",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Core manifest, crypto, and OTA protocol utilities for EdgeOTA",
+  "license": "MIT",
+  "author": "EdgeOTA Contributors",
+  "homepage": "https://github.com/renbostudios/edge-ota-cli",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itskodaaa/edge-ota.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/renbostudios/edge-ota-cli/issues"
+  },
+  "keywords": ["expo", "ota", "updates", "react-native", "edge"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.12.12"
+  }
+}

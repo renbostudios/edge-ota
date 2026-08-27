@@ -1,0 +1,26 @@
+{
+  "name": "@edge-ota/server-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsc && node dist/index.js",
+    "build": "tsc",
+    "clean": "rm -rf dist updates.db uploads"
+  },
+  "dependencies": {
+    "@renbostudios/edge-ota-core": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.12.12",
+    "@types/pg": "^8.20.0",
+    "typescript": "^5.4.5"
+  }
+}

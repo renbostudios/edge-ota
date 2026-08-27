@@ -1,53 +1,38 @@
 {
-  "name": "@renbostudios/edge-ota",
-  "version": "0.4.2",
-  "preferGlobal": true,
-  "description": "Zero-SDK, self-hostable OTA update CLI for Expo — push signed JS bundles to any EdgeOTA server",
-  "license": "MIT",
-  "author": "EdgeOTA Contributors",
-  "homepage": "https://github.com/renbostudios/edge-ota-cli",
-  "publishConfig": {
-    "access": "public"
-  },
+  "name": "edge-ota",
+  "private": true,
+  "description": "Zero-SDK, self-hostable OTA update platform for Expo — CLI, Server, and Worker",
+  "homepage": "https://ota.renbo.site",
   "repository": {
     "type": "git",
-    "url": "https://github.com/itskodaaa/edge-ota.git",
-    "directory": "apps/cli"
+    "url": "https://github.com/renbostudios/edge-ota.git"
   },
-  "bugs": {
-    "url": "https://github.com/renbostudios/edge-ota-cli/issues"
+  "engines": {
+    "node": "24.x",
+    "pnpm": ">=8.0.0"
   },
-  "keywords": [
-    "expo",
-    "ota",
-    "updates",
-    "react-native",
-    "cli",
-    "edge",
-    "cloudflare"
-  ],
-  "type": "module",
-  "bin": {
-    "edge-ota": "./dist/index.js"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
-  },
-  "dependencies": {
-    "archiver": "^7.0.1",
-    "commander": "^12.1.0"
+    "dev:cli": "pnpm --filter @renbostudios/edge-ota dev",
+    "dev:worker": "pnpm --filter @edge-ota/worker-oss dev",
+    "dev:server": "pnpm --filter @edge-ota/server-node dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean",
+    "changeset": "changeset",
+    "ci:version": "changeset version",
+    "ci:publish": "changeset publish"
   },
   "devDependencies": {
-    "@types/archiver": "^6.0.2",
-    "@types/node": "^20.12.12",
-    "tsup": "^8.5.1",
+    "@changesets/cli": "^3.0.1",
     "typescript": "^5.4.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp",
+      "workerd",
+      "prebuild-install"
+    ]
   }
 }

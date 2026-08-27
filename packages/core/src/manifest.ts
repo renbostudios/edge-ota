@@ -58,6 +58,9 @@ function hexToBase64Url(hex: string): string {
   if (hex.length !== 64 || !/^[0-9a-fA-F]+$/.test(hex)) {
     return hex;
   }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(hex, "hex").toString("base64url");
+  }
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);

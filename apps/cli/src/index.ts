@@ -25,7 +25,7 @@ import {
   generateECDSAKeyPair,
   signPayload,
   sha256Hex
-} from "./core/index.js";
+} from "@renbostudios/edge-ota-core";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

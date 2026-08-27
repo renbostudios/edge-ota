@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  edge-ota-backend:
+    image: ghcr.io/${IMAGE_OWNER}/edge-ota-backend:latest
+    container_name: edge-ota-backend
+    restart: always
+    ports:
+      - "3020:3000" # Map host port 3020 to container port 3000
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - ./data/uploads:/app/apps/server-node/uploads
+      - ./data/updates.db:/app/apps/server-node/updates.db
+
+networks:
+  default:
+    name: edge-ota-net
+    driver: bridge
