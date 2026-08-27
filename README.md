@@ -27,14 +27,14 @@
 
 ```
  ╔══════════════════════════════════════════════════════════════════╗
- ║                                                                  ║
- ║   ┌─┐┬┌─┬┌┬┐┌─┐┌─┐┬ ┬┌─┐┌┐┌┌┬┐┌─┐                                ║
- ║   └─┐││ ┤│││├┤ │ ┬├─┤├─┤│││ │ ┤ └─┐                              ║
- ║   └─┘┴└─┴┴ ┴└  └─┘┴ ┴┴ ┴┘└┘─┴┘└─┘└─┘                             ║
- ║                                                                  ║
- ║   Push signed OTA bundles to the edge.                           ║
- ║   Zero SDK. Zero egress. Full control.                           ║
- ║                                                                  ║
+ ║                                                                ║
+ ║   ┌─┐┬┌─┬┌┬┐┌─┐┌─┐┬ ┬┌─┐┌┐┌┌┬┐┌─┐                          ║
+ ║   └─┐││ ┤│││├┤ │ ┬├─┤├─┤│││ │ ┤ └─┐                         ║
+ ║   └─┘┴└─┴┴ ┴└  └─┘┴ ┴┴ ┴┘└┘─┴┘└─┘└─┘                         ║
+ ║                                                                ║
+ ║   Push signed OTA bundles to the edge.                         ║
+ ║   Zero SDK. Zero egress. Full control.                         ║
+ ║                                                                ║
  ╚══════════════════════════════════════════════════════════════════╝
 ```
 
@@ -102,7 +102,9 @@ edge-ota push
 > **📹 Prefer video?** Watch the full setup tutorial below:
 
 <p align="center">
-  <img src="https://pd1mvpk7lt.ufs.sh/f/6uDGWrRxa3ipIqwlCq2SVhxLk3eOC7q5TcGHv8ud2nRMUQJp" width="640" alt="Setup tutorial demo">
+  <video src="https://pd1mvpk7lt.ufs.sh/f/6uDGWrRxa3ipmhByNjc2TlHph0oA4dsWRFUuqZMan18Gwb7g" controls width="100%" style="max-width: 640px; border: 1px solid #333; border-radius: 4px; background: #000;">
+    Your browser does not support the video tag.
+  </video>
 </p>
 
 <br>
@@ -174,6 +176,8 @@ Export your Expo bundle and publish an OTA update.
 ```bash
 edge-ota push                                     # all platforms, production channel
 edge-ota push --channel staging                   # deploy to staging
+edge-ota push --runtime 1.0.0                     # target specific runtime version
+edge-ota push --runtime 1.0.5,1.0.6,1.0.7         # target multiple runtime versions (matrix deployment)
 edge-ota push --platform ios                      # iOS only
 edge-ota push --platform android                  # Android only
 edge-ota push --skip-export                       # use existing ./dist

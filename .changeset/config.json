@@ -9,6 +9,7 @@
   "updateInternalDependencies": "patch",
   "ignore": [
     "@renbostudios/edge-ota-core",
+    "@edge-ota/dashboard",
     "@edge-ota/server-node",
     "@edge-ota/worker-oss"
   ]
