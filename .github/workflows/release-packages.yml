@@ -10,6 +10,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     name: Release
+    if: github.repository == 'renbostudios/edge-ota'
     runs-on: ubuntu-latest
     permissions:
       contents: write
