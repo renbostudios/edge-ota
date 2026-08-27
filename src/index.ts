@@ -111,10 +111,73 @@ const c = {
   green:     "\x1b[32m",
   yellow:    "\x1b[33m",
   blue:      "\x1b[34m",
+  magenta:   "\x1b[35m",
   cyan:      "\x1b[36m",
   white:     "\x1b[37m",
   gray:      "\x1b[90m",
 };
+
+// ─── Diagnostic Formatting Helpers ───────────────────────────────────────────
+
+function printErrorBox(title: string, reason: string, solution?: string | string[]): void {
+  const sep = `${c.red}${"─".repeat(56)}${c.reset}`;
+  console.error(`\n${sep}`);
+  console.error(`  ${c.red}${c.bold}✖  ${title}${c.reset}`);
+  console.error(`  ${c.dim}${reason}${c.reset}`);
+  if (solution) {
+    console.error();
+    console.error(`  ${c.cyan}${c.bold}💡 How to fix:${c.reset}`);
+    const sols = Array.isArray(solution) ? solution : [solution];
+    for (const s of sols) {
+      console.error(`     ${s}`);
+    }
+  }
+  console.error(`${sep}\n`);
+}
+
+function printWarningBox(title: string, reason: string, tip?: string): void {
+  const sep = `${c.yellow}${"─".repeat(56)}${c.reset}`;
+  console.warn(`\n${sep}`);
+  console.warn(`  ${c.yellow}${c.bold}⚠  ${title}${c.reset}`);
+  console.warn(`  ${c.dim}${reason}${c.reset}`);
+  if (tip) {
+    console.warn(`  ${c.cyan}${tip}${c.reset}`);
+  }
+  console.warn(`${sep}\n`);
+}
+
+function diagnoseNetworkError(err: any, serverUrl: string): { title: string; reason: string; solution: string[] } {
+  const msg = err?.message || String(err);
+  if (msg.includes("ECONNREFUSED")) {
+    return {
+      title: "Cannot connect to EdgeOTA server",
+      reason: `Server at ${c.bold}${serverUrl}${c.reset}${c.dim} refused the connection (ECONNREFUSED).`,
+      solution: [
+        `Ensure your EdgeOTA server is running: ${c.bold}lsof -i :3020${c.reset} or check your server process.`,
+        `Verify the server URL in ${c.bold}app.json${c.reset} or specify ${c.cyan}-s <url>${c.reset}`,
+        `If using USB physical device debugging, run ${c.cyan}adb reverse tcp:3020 tcp:3020${c.reset}`
+      ]
+    };
+  }
+  if (msg.includes("ETIMEDOUT") || msg.includes("timeout") || msg.includes("aborted")) {
+    return {
+      title: "Server request timed out",
+      reason: `Connection to ${c.bold}${serverUrl}${c.reset}${c.dim} exceeded timeout threshold.`,
+      solution: [
+        "Check your internet connection or local network routing.",
+        "Ensure your firewall or VPS security group permits traffic on this port."
+      ]
+    };
+  }
+  return {
+    title: "Network request failed",
+    reason: msg,
+    solution: [
+      `Check your server URL: ${c.bold}${serverUrl}${c.reset}`,
+      `Verify internet connectivity and try again.`
+    ]
+  };
+}
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
 
@@ -161,7 +224,7 @@ const spin = (() => {
 
 // ─── Package version ─────────────────────────────────────────────────────────
 
-let packageVersion = "0.3.0";
+let packageVersion = "0.4.0";
 try {
   const pkgPath = path.join(__dirname, "..", "package.json");
   if (fs.existsSync(pkgPath)) {
@@ -193,18 +256,15 @@ async function checkAndAutoUpdate() {
     if (fs.existsSync(UPDATE_CHECK_FILE)) {
       try {
         const cache = JSON.parse(fs.readFileSync(UPDATE_CHECK_FILE, "utf-8"));
-        // Only check npm once every 15 minutes to keep CLI commands extremely fast
         if (now - (cache.lastChecked || 0) < 15 * 60 * 1000) {
           return;
         }
       } catch { /* ignore */ }
     }
 
-    // Save timestamp immediately to prevent concurrent requests
     fs.mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
     fs.writeFileSync(UPDATE_CHECK_FILE, JSON.stringify({ lastChecked: now }));
 
-    // Fetch latest version from registry with a short 1s timeout
     const controller = new AbortController();
     const timerId = setTimeout(() => controller.abort(), 1000);
 
@@ -240,7 +300,7 @@ async function checkAndAutoUpdate() {
 // ─── Banner ───────────────────────────────────────────────────────────────────
 
 function printBanner() {
-  const sep = `${c.dim}${"─".repeat(52)}${c.reset}`;
+  const sep = `${c.dim}${"─".repeat(56)}${c.reset}`;
   console.log(`\n${sep}`);
   console.log(`  ${c.bold}${c.white}edge-ota${c.reset}  ${c.dim}v${packageVersion} · Zero-SDK OTA for Expo${c.reset}`);
   console.log(`  ${c.dim}by ${c.reset}${c.bold}Renbo Studios${c.reset}${c.dim} — Mobile App Development Studio${c.reset}`);
@@ -262,16 +322,26 @@ interface AppJsonConfig {
 function readAppJson(cwd: string): AppJsonConfig {
   const appJsonPath = path.resolve(cwd, "app.json");
   if (!fs.existsSync(appJsonPath)) {
-    console.error(`\n  ${c.red}✗${c.reset}  ${c.bold}app.json not found${c.reset} in ${cwd}`);
-    console.error(`     Run this command from your Expo project root.\n`);
+    printErrorBox(
+      "app.json not found",
+      `No app.json file located in directory: ${cwd}`,
+      [
+        `Ensure you are running edge-ota commands from the ${c.bold}root directory${c.reset} of your Expo project.`,
+        `If you use dynamic config (${c.dim}app.config.js / app.config.ts${c.reset}), create a base ${c.bold}app.json${c.reset} file with your Expo configuration.`
+      ]
+    );
     process.exit(1);
   }
 
   let data: any;
   try {
     data = JSON.parse(fs.readFileSync(appJsonPath, "utf-8"));
-  } catch {
-    console.error(`  ${c.red}✗${c.reset}  Failed to parse app.json`);
+  } catch (parseErr: any) {
+    printErrorBox(
+      "Invalid app.json syntax",
+      `Failed to parse JSON in ${appJsonPath}: ${parseErr.message}`,
+      `Verify that app.json contains valid JSON syntax (no trailing commas, unclosed brackets, or unescaped quotes).`
+    );
     process.exit(1);
   }
 
@@ -280,8 +350,14 @@ function readAppJson(cwd: string): AppJsonConfig {
   // ── Runtime version ──
   let runtimeVersion = expo.runtimeVersion;
   if (!runtimeVersion) {
-    console.error(`  ${c.red}✗${c.reset}  ${c.bold}expo.runtimeVersion${c.reset} is not set in app.json`);
-    console.error(`     Add: ${c.dim}"runtimeVersion": "1.0.0"${c.reset} under the expo key.\n`);
+    printErrorBox(
+      "Missing expo.runtimeVersion in app.json",
+      "Expo Updates requires a runtimeVersion to ensure native compatibility between the app binary and JS bundle.",
+      [
+        `Add a fixed version string in ${c.bold}app.json${c.reset} under ${c.dim}"expo"${c.reset}: ${c.cyan}"runtimeVersion": "1.0.0"${c.reset}`,
+        `Or use an Expo policy helper: ${c.cyan}"runtimeVersion": { "policy": "appVersion" }${c.reset}`
+      ]
+    );
     process.exit(1);
   }
 
@@ -298,24 +374,33 @@ function readAppJson(cwd: string): AppJsonConfig {
   }
 
   if (!runtimeVersion || typeof runtimeVersion !== "string") {
-    console.error(`  ${c.red}✗${c.reset}  Could not resolve ${c.bold}expo.runtimeVersion${c.reset} to a valid string in app.json`);
-    if (typeof expo.runtimeVersion === "object") {
-      console.error(`     Since you are using a policy, please ensure either ${c.bold}expo.version${c.reset} or ${c.bold}expo.sdkVersion${c.reset} is defined.\n`);
-    }
+    printErrorBox(
+      "Could not resolve runtimeVersion",
+      `expo.runtimeVersion in app.json resolved to: ${JSON.stringify(runtimeVersion)}`,
+      [
+        `If using ${c.dim}"policy": "appVersion"${c.reset}, make sure ${c.bold}"expo.version"${c.reset} (e.g. "1.0.0") is defined in app.json.`,
+        `If using ${c.dim}"policy": "sdkVersion"${c.reset}, make sure ${c.bold}"expo.sdkVersion"${c.reset} (e.g. "52.0.0") is defined.`,
+        `Or simply specify a static string: ${c.cyan}"runtimeVersion": "1.0.0"${c.reset}`
+      ]
+    );
     process.exit(1);
   }
 
   // ── Updates URL ──
   const updatesUrl: string = expo?.updates?.url ?? "";
   if (!updatesUrl) {
-    console.error(`  ${c.red}✗${c.reset}  ${c.bold}expo.updates.url${c.reset} is not configured in app.json`);
-    console.error(`     Run ${c.cyan}edge-ota init${c.reset} to set this up.\n`);
+    printErrorBox(
+      "Missing expo.updates.url in app.json",
+      "Your app is not configured to receive updates from an EdgeOTA server.",
+      [
+        `Run ${c.cyan}edge-ota init${c.reset} in this directory to automatically configure your project.`,
+        `Or manually add under ${c.dim}"expo.updates"${c.reset}: ${c.cyan}"url": "https://api.ota.renbo.site/api/projects/<project-id>/updates"${c.reset}`
+      ]
+    );
     process.exit(1);
   }
 
   // Parse serverUrl and projectId from the updates URL.
-  // Expected format: https://<host>/api/projects/<uuid>/updates
-  //              or: https://<host>/api/updates
   let serverUrl: string;
   let projectId: string | null = null;
 
@@ -329,13 +414,15 @@ function readAppJson(cwd: string): AppJsonConfig {
       serverUrl = `${u.protocol}//${u.host}`;
     }
   } catch {
-    console.error(`  ${c.red}✗${c.reset}  Could not parse ${c.dim}expo.updates.url${c.reset} in app.json`);
+    printErrorBox(
+      "Malformed expo.updates.url",
+      `The URL "${updatesUrl}" in app.json is not a valid HTTP/HTTPS URL.`,
+      `Run ${c.cyan}edge-ota init${c.reset} to generate a valid updates URL.`
+    );
     process.exit(1);
   }
 
   // ── Project-level server override ──
-  // expo.extra.edgeOtaServer lets users point a specific project at a
-  // different (self-hosted) EdgeOTA instance without re-logging in.
   const projectServer: string | undefined = expo?.extra?.edgeOtaServer;
   if (projectServer) {
     serverUrl = projectServer.replace(/\/$/, "");
@@ -362,9 +449,6 @@ function updateAppJson(cwd: string, serverUrl: string, projectId?: string, publi
     data.expo.updates.fallbackToCacheTimeout = data.expo.updates.fallbackToCacheTimeout ?? 30000;
     data.expo.updates.requestHeaders = data.expo.updates.requestHeaders ?? { "expo-channel-name": "production" };
 
-    // Store the server URL in expo.extra.edgeOtaServer so users can easily
-    // override which EdgeOTA instance this project points to without re-running
-    // `edge-ota login`. They can edit this value directly in app.json.
     data.expo.extra.edgeOtaServer = cleanUrl;
 
     if (publicKey) {
@@ -374,7 +458,7 @@ function updateAppJson(cwd: string, serverUrl: string, projectId?: string, publi
     fs.writeFileSync(appJsonPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
     console.log(`  ${c.dim}app.json${c.reset}    updated ${c.dim}expo.updates.url${c.reset} + ${c.dim}expo.extra.edgeOtaServer${c.reset}`);
   } catch (e: any) {
-    console.error(`  ${c.yellow}⚠${c.reset}   Could not update app.json: ${e.message}`);
+    printWarningBox("Could not write to app.json", e.message, "Ensure app.json is writable.");
   }
 }
 
@@ -574,10 +658,8 @@ function findBundle(distDir: string, platform: string): string | null {
 // ─── Auth token resolution ────────────────────────────────────────────────────
 
 function resolveToken(): string | null {
-  // 1. Global config
   const cfg = loadGlobalConfig();
   if (cfg?.token) return cfg.token;
-  // 2. Env var fallback
   return process.env.EDGE_OTA_TOKEN || null;
 }
 
@@ -587,8 +669,22 @@ const program = new Command();
 
 program
   .name("edge-ota")
-  .description("Zero-SDK OTA update platform for Expo — by Renbo Studios")
+  .description("Zero-SDK, self-hostable OTA update platform for Expo — by Renbo Studios")
   .version(packageVersion);
+
+// Customize top-level help
+program.addHelpText("after", `
+${c.bold}Quick Start:${c.reset}
+  1. ${c.cyan}edge-ota login${c.reset}                       Authenticate with EdgeOTA
+  2. ${c.cyan}edge-ota init${c.reset}                        Configure your Expo app and generate signing keys
+  3. ${c.cyan}npx expo prebuild --clean${c.reset}            Bake the server URL into native files (Required!)
+  4. ${c.cyan}edge-ota push${c.reset}                        Export and publish your first OTA update
+
+${c.bold}Documentation & Support:${c.reset}
+  Website:       https://ota.renbo.site
+  Studio:        https://renbostudios.com
+  GitHub:        https://github.com/renbostudios/edge-ota-cli
+`);
 
 // Show help + auth status when called with no arguments
 program.action(() => {
@@ -613,7 +709,7 @@ program.action(() => {
     console.log(`  ${c.cyan}${cmd.padEnd(10)}${c.reset}  ${c.dim}${desc}${c.reset}`);
   }
   console.log();
-  console.log(`  Run ${c.cyan}edge-ota <command> --help${c.reset} for command-specific options.`);
+  console.log(`  Run ${c.cyan}edge-ota <command> --help${c.reset} for detailed command options and examples.`);
   console.log();
 });
 
@@ -623,8 +719,18 @@ program.action(() => {
 
 program
   .command("login")
-  .description("Authenticate with your EdgeOTA account")
-  .option("-s, --server <url>", `EdgeOTA server URL (default: ${DEFAULT_SERVER})`)
+  .description("Authenticate with your EdgeOTA account and save credentials globally")
+  .option("-s, --server <url>", "EdgeOTA server URL", DEFAULT_SERVER)
+  .addHelpText("after", `
+${c.bold}Examples:${c.reset}
+  $ ${c.cyan}edge-ota login${c.reset}                          Sign in to standard cloud service (${DEFAULT_SERVER})
+  $ ${c.cyan}edge-ota login -s http://localhost:3020${c.reset} Sign in to a self-hosted local server
+  $ ${c.cyan}edge-ota login -s https://ota.mycompany.com${c.reset} Sign in to a self-hosted custom domain
+
+${c.bold}CI/CD Environments:${c.reset}
+  Instead of interactive login, set the ${c.bold}EDGE_OTA_TOKEN${c.reset} environment variable:
+  $ ${c.cyan}export EDGE_OTA_TOKEN="eota_prod_..."${c.reset}
+`)
   .action(async (options) => {
     printBanner();
 
@@ -650,7 +756,30 @@ program
 
       if (!res.ok) {
         const text = await res.text();
-        spin.fail(`Login failed: ${text || res.statusText}`);
+        spin.fail("Authentication failed");
+        if (res.status === 401) {
+          printErrorBox(
+            "Invalid email or password",
+            text || "The credentials provided were rejected by the server.",
+            [
+              `Check your email and password for typos.`,
+              `If you don't have an account yet, register at ${c.bold}https://ota.renbo.site${c.reset}`,
+              `If using self-hosted server, verify ${c.bold}${serverUrl}${c.reset} is correct.`
+            ]
+          );
+        } else if (res.status === 403) {
+          printErrorBox(
+            "Account email not verified",
+            text || "Your account email has not been verified.",
+            `Check your inbox for the verification OTP or log in to the dashboard to verify your email.`
+          );
+        } else {
+          printErrorBox(
+            `Server returned HTTP ${res.status}`,
+            text || res.statusText,
+            `Check server logs or try again shortly.`
+          );
+        }
         process.exit(1);
       }
 
@@ -658,14 +787,16 @@ program
       saveGlobalConfig({ token: data.token, email: data.email, serverUrl });
 
       spin.stop();
-      const sep = `${c.dim}${"─".repeat(52)}${c.reset}`;
+      const sep = `${c.dim}${"─".repeat(56)}${c.reset}`;
       console.log(sep);
       console.log(`  ${c.green}✓${c.reset}  Logged in as ${c.bold}${data.email}${c.reset}`);
       console.log(`  ${c.dim}credentials saved to ${GLOBAL_CONFIG_FILE}${c.reset}`);
       console.log(sep + "\n");
       process.exit(0);
     } catch (e: any) {
-      spin.fail(`Connection failed: ${e.message}`);
+      spin.fail("Connection failed");
+      const diag = diagnoseNetworkError(e, serverUrl);
+      printErrorBox(diag.title, diag.reason, diag.solution);
       process.exit(1);
     }
   });
@@ -676,7 +807,12 @@ program
 
 program
   .command("logout")
-  .description("Remove stored credentials")
+  .description("Remove stored credentials and log out")
+  .addHelpText("after", `
+${c.bold}Details:${c.reset}
+  Deletes the global configuration file at ${c.dim}${GLOBAL_CONFIG_FILE}${c.reset}.
+  Project private signing keys in ${c.dim}${GLOBAL_KEYS_DIR}${c.reset} are preserved.
+`)
   .action(() => {
     printBanner();
     const cfg = loadGlobalConfig();
@@ -695,14 +831,34 @@ program
 
 program
   .command("init")
-  .description("Register project on EdgeOTA, generate signing keys, configure app.json")
+  .description("Register project on EdgeOTA, generate signing keys, and configure app.json")
   .option("-s, --server <url>", "EdgeOTA server URL (overrides logged-in server)")
+  .addHelpText("after", `
+${c.bold}What this command does:${c.reset}
+  1. Authenticates with your EdgeOTA server
+  2. Creates or links a project ID
+  3. Generates a cryptographic ECDSA P-256 code-signing keypair
+  4. Stores private key securely in ${c.dim}~/.config/edge-ota/keys/<projectId>.key${c.reset}
+  5. Updates ${c.bold}app.json${c.reset} with ${c.dim}expo.updates.url${c.reset} and public key
+
+${c.bold}Critical Next Step:${c.reset}
+  After running ${c.cyan}edge-ota init${c.reset}, you ${c.bold}MUST rebuild your native app${c.reset}:
+    $ ${c.cyan}npx expo prebuild --clean${c.reset}
+    $ ${c.cyan}npx expo run:android${c.reset}   (or ${c.cyan}npx expo run:ios${c.reset} / ${c.cyan}eas build${c.reset})
+`)
   .action(async (options) => {
     printBanner();
 
     const token = resolveToken();
     if (!token) {
-      console.error(`  ${c.red}✗${c.reset}  Not logged in. Run ${c.cyan}edge-ota login${c.reset} first.\n`);
+      printErrorBox(
+        "Not logged in",
+        "You must be authenticated to initialize a project.",
+        [
+          `Run ${c.cyan}edge-ota login${c.reset} to authenticate interactively.`,
+          `Or set ${c.cyan}export EDGE_OTA_TOKEN="eota_prod_..."${c.reset} in your environment.`
+        ]
+      );
       process.exit(1);
     }
 
@@ -722,26 +878,27 @@ program
       }
       spin.stop();
     } catch (e: any) {
-      spin.fail(`Failed to fetch projects: ${e.message}`);
-      // Continue with creation if list fails
+      spin.fail("Failed to fetch projects list");
+      const diag = diagnoseNetworkError(e, serverUrl);
+      printWarningBox(diag.title, diag.reason, "Proceeding with new project registration...");
     }
 
     let projectId: string | null = null;
     let projectName = "";
 
     if (projects.length > 0) {
-      const options = projects.map(p => ({
+      const selectOptions = projects.map(p => ({
         label: `${p.name} ${c.dim}(id: ${p.id.slice(0, 8)}...)${c.reset}`,
         value: p
       }));
-      options.push({
-        label: `${c.green}Create a new project...${c.reset}`,
+      selectOptions.push({
+        label: `${c.green}+ Create a new project...${c.reset}`,
         value: null
       });
 
       const selected = await selectOption(
         "Select a project to associate with this app:",
-        options
+        selectOptions
       );
 
       if (selected) {
@@ -764,12 +921,19 @@ program
 
         if (!res.ok) {
           const text = await res.text();
-          spin.fail(`Failed to update project public key on server: ${text}`);
+          spin.fail("Failed to update project public key");
+          printErrorBox(
+            `Server returned HTTP ${res.status}`,
+            text,
+            `Ensure your user account has administrator or member permissions for project "${projectName}".`
+          );
           process.exit(1);
         }
         spin.stop(`associated project "${projectName}"`);
       } catch (e: any) {
-        spin.fail(`Connection error: ${e.message}`);
+        spin.fail("Connection error during project update");
+        const diag = diagnoseNetworkError(e, serverUrl);
+        printErrorBox(diag.title, diag.reason, diag.solution);
         process.exit(1);
       }
     } else {
@@ -792,7 +956,12 @@ program
 
         if (!res.ok) {
           const text = await res.text();
-          spin.fail(`Failed to register project: ${text}`);
+          spin.fail("Failed to register project");
+          printErrorBox(
+            `Server returned HTTP ${res.status}`,
+            text,
+            `Check that your session token is valid and project name is acceptable.`
+          );
           process.exit(1);
         }
 
@@ -800,7 +969,9 @@ program
         projectId = data.id;
         spin.stop("project registered");
       } catch (e: any) {
-        spin.fail(`Connection error: ${e.message}`);
+        spin.fail("Connection error during registration");
+        const diag = diagnoseNetworkError(e, serverUrl);
+        printErrorBox(diag.title, diag.reason, diag.solution);
         process.exit(1);
       }
     }
@@ -811,9 +982,9 @@ program
       // Update app.json
       updateAppJson(cwd, serverUrl, projectId, keys.publicKey);
 
-      const sep = `${c.dim}${"─".repeat(52)}${c.reset}`;
+      const sep = `${c.dim}${"─".repeat(56)}${c.reset}`;
       console.log(`\n${sep}`);
-      console.log(`  ${c.green}✓${c.reset}  ${c.bold}Initialised${c.reset}`);
+      console.log(`  ${c.green}✓${c.reset}  ${c.bold}Initialised Successfully${c.reset}`);
       console.log(sep);
       console.log(`  project    ${c.dim}${projectId}${c.reset}`);
       console.log(`  server     ${c.dim}${serverUrl}${c.reset}`);
@@ -823,16 +994,15 @@ program
       console.log(`\n${c.bold}${c.yellow}  ⚠  REBUILD REQUIRED${c.reset}`);
       console.log(sep);
       console.log(`  ${c.bold}Your native app MUST be rebuilt for OTA updates${c.reset}`);
-      console.log(`  ${c.bold}to work.${c.reset} The server URL is baked into the native`);
-      console.log(`  binary at build time — not read from app.json.`);
+      console.log(`  ${c.bold}to work.${c.reset} The server URL is baked into native`);
+      console.log(`  binary configurations at build time — not read dynamically from app.json.`);
       console.log();
       console.log(`  Run these commands in order:`);
       console.log();
       console.log(`    ${c.cyan}npx expo prebuild --clean${c.reset}`);
-      console.log(`    ${c.cyan}npx expo run:ios${c.reset}`);
-      console.log(`    ${c.cyan}npx expo run:android${c.reset}`);
+      console.log(`    ${c.cyan}npx expo run:android${c.reset}  (or ${c.cyan}npx expo run:ios${c.reset})`);
       console.log();
-      console.log(`  Or via EAS:`);
+      console.log(`  Or via EAS Build:`);
       console.log(`    ${c.cyan}eas build --profile production${c.reset}`);
       console.log();
       console.log(`  ${c.red}Skipping this WILL cause "Failed to check for${c.reset}`);
@@ -850,11 +1020,28 @@ program
 
 program
   .command("push")
-  .description("Export your Expo bundle and publish an OTA update")
-  .option("-c, --channel <channel>",  "Deployment channel",                       "production")
-  .option("-p, --platform <platform>","Target platform: ios | android | all",     "all")
-  .option("--skip-export",            "Skip expo export (use existing ./dist directory)")
-  .option("--dry-run",                "Build and sign the payload but do NOT upload")
+  .description("Export bundle, sign with ECDSA P-256, and publish an OTA update")
+  .option("-c, --channel <channel>",   "Deployment channel", "production")
+  .option("-p, --platform <platform>", "Target platform: ios | android | all", "all")
+  .option("-r, --runtime <runtime>",   "Override target runtime version (comma-separated for multi-runtime matrix, e.g. 1.0.0,1.0.1)")
+  .option("--skip-export",             "Skip expo export (use existing ./dist directory)")
+  .option("--dry-run",                 "Build and sign payload locally without uploading")
+  .addHelpText("after", `
+${c.bold}Examples:${c.reset}
+  $ ${c.cyan}edge-ota push${c.reset}                               Publish update to 'production' channel
+  $ ${c.cyan}edge-ota push -c staging${c.reset}                    Publish update to 'staging' channel
+  $ ${c.cyan}edge-ota push -p android${c.reset}                    Publish to Android only
+  $ ${c.cyan}edge-ota push -r 1.0.5${c.reset}                      Override runtime version to 1.0.5
+  $ ${c.cyan}edge-ota push -r 1.0.0,1.0.1,2.0.0${c.reset}          Hotfix multiple native runtime versions simultaneously
+  $ ${c.cyan}edge-ota push --skip-export${c.reset}                 Deploy existing ./dist without re-running expo export
+  $ ${c.cyan}edge-ota push --dry-run${c.reset}                     Verify build, asset collection, and signature locally
+
+${c.bold}How It Works:${c.reset}
+  1. Runs ${c.dim}npx expo export${c.reset} to produce Hermes bytecode bundles (.hbc)
+  2. Discovers and uploads static media assets (.png, .jpg, .svg, .ttf, etc.)
+  3. Signs bundle hash with private key in ${c.dim}~/.config/edge-ota/keys/<projectId>.key${c.reset}
+  4. Publishes update to EdgeOTA server for instant client OTA sync
+`)
   .action(async (options) => {
     const cwd   = process.cwd();
     const token = resolveToken();
@@ -862,23 +1049,35 @@ program
     printBanner();
 
     if (!token) {
-      console.error(`  ${c.red}✗${c.reset}  Not logged in. Run ${c.cyan}edge-ota login${c.reset} first.`);
-      console.error(`     Or set ${c.dim}EDGE_OTA_TOKEN${c.reset} environment variable.\n`);
+      printErrorBox(
+        "Not logged in",
+        "You must be authenticated to publish an OTA update.",
+        [
+          `Run ${c.cyan}edge-ota login${c.reset} to sign in to your EdgeOTA account.`,
+          `Or set ${c.cyan}export EDGE_OTA_TOKEN="eota_prod_..."${c.reset} in your environment (recommended for CI/CD).`
+        ]
+      );
       process.exit(1);
     }
 
     // Auto-detect from app.json
     const appCfg = readAppJson(cwd);
-    const { serverUrl, projectId, runtimeVersion } = appCfg;
+    const { serverUrl, projectId } = appCfg;
+    const runtimeVersion = options.runtime || appCfg.runtimeVersion;
 
     // Load private signing key
     const privateKey = projectId ? loadPrivateKey(projectId) : null;
     if (!privateKey) {
-      console.error(`  ${c.red}✗${c.reset}  No signing key found for this project.`);
-      if (projectId) {
-        console.error(`     Expected at: ${c.dim}${path.join(GLOBAL_KEYS_DIR, `${projectId}.key`)}${c.reset}`);
-      }
-      console.error(`     Run ${c.cyan}edge-ota init${c.reset} to set up code signing.\n`);
+      const keyPath = projectId ? path.join(GLOBAL_KEYS_DIR, `${projectId}.key`) : "unknown";
+      printErrorBox(
+        "No signing key found for this project",
+        `Expected private key file at: ${keyPath}`,
+        [
+          `Run ${c.cyan}edge-ota init${c.reset} to re-associate this project and generate a new keypair.`,
+          `If collaborating with a team, copy the project's private key into ${c.bold}${keyPath}${c.reset}`,
+          `Or generate keys manually using ${c.cyan}edge-ota keygen${c.reset}`
+        ]
+      );
       process.exit(1);
     }
 
@@ -904,20 +1103,17 @@ program
           const text = chunk.toString();
           for (const line of text.split("\n")) {
             const t = line.trim();
-            // Show platform bundle summary lines only
             if (t.startsWith("_expo/static/js/") || t.match(/\.(hbc|js)\s+\(\d/)) {
               spin.stop();
               console.log(`  ${c.dim}${t}${c.reset}`);
               spin.start("running expo export");
             }
-            // Update spinner with bundling progress
             if (t.match(/Bundled \d+ms/)) {
               spin.update("expo export — " + t.replace("Bundled", "").trim());
             }
           }
         });
 
-        // Suppress stderr noise but capture real errors
         let stderrBuf = "";
         proc.stderr?.on("data", (chunk: Buffer) => { stderrBuf += chunk.toString(); });
 
@@ -927,9 +1123,15 @@ program
             resolve();
           } else {
             spin.fail("expo export failed");
-            // Print last few lines of stderr for context
-            const lines = stderrBuf.split("\n").filter(Boolean);
-            for (const l of lines.slice(-10)) console.error(`  ${c.dim}${l}${c.reset}`);
+            printErrorBox(
+              "Expo export failed",
+              `npx expo export exited with code ${code}`,
+              [
+                `Run ${c.bold}npx expo export${c.reset} directly in your terminal to see full Metro compiler logs.`,
+                `Check for TypeScript compiler errors, missing dependencies, or invalid asset imports.`,
+                `Recent stderr output:\n${c.dim}${stderrBuf.slice(-400).trim()}${c.reset}`
+              ]
+            );
             reject(new Error(`expo export exited with code ${code}`));
           }
         });
@@ -940,17 +1142,53 @@ program
     }
 
     if (!fs.existsSync(distDir)) {
-      console.error(`  ${c.red}✗${c.reset}  ./dist not found after export\n`);
+      printErrorBox(
+        "dist directory not found",
+        `Expected export output at ${distDir}`,
+        [
+          `Run ${c.cyan}edge-ota push${c.reset} without ${c.dim}--skip-export${c.reset} to automatically generate bundles.`,
+          `Or manually build using ${c.cyan}npx expo export${c.reset}`
+        ]
+      );
       process.exit(1);
     }
 
-    // ── Step 2: Collect assets ───────────────────────────────────────────────
+    // ── Step 2: Collect and upload assets ────────────────────────────────────
     spin.start("collecting assets");
     const assets = await collectAssets(distDir);
-    spin.stop(`found ${assets.length} asset(s)`);
+    const mediaAssets = assets.filter(a => !a.key.endsWith(".js") && !a.key.endsWith(".hbc"));
+    spin.stop(`found ${assets.length} total asset(s) (${mediaAssets.length} static assets)`);
+
+    // Upload static media assets to server if any
+    if (mediaAssets.length > 0 && !options.dryRun) {
+      spin.start(`uploading ${mediaAssets.length} static asset(s)`);
+      try {
+        const assetForm = new FormData();
+        for (const ma of mediaAssets) {
+          const fileBuf = fs.readFileSync(ma.localPath);
+          assetForm.append("assets", new Blob([fileBuf], { type: ma.contentType }), path.basename(ma.localPath));
+        }
+        const assetUploadUrl = `${serverUrl}/api/assets/upload`;
+        const assetRes = await fetch(assetUploadUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(projectId ? { "X-Project-Id": projectId } : {})
+          },
+          body: assetForm
+        });
+        if (assetRes.ok) {
+          spin.stop(`synced ${mediaAssets.length} static asset(s)`);
+        } else {
+          spin.stop(`asset sync notice: server returned HTTP ${assetRes.status}`);
+        }
+      } catch (assetErr: any) {
+        spin.stop(`asset sync: ${c.dim}${assetErr.message}${c.reset}`);
+      }
+    }
 
     const platforms = options.platform === "all" ? ["ios", "android"] : [options.platform];
-    const sep = `${c.dim}${"─".repeat(52)}${c.reset}`;
+    const sep = `${c.dim}${"─".repeat(56)}${c.reset}`;
 
     // ── Step 3: Per-platform upload ──────────────────────────────────────────
     for (const platform of platforms) {
@@ -960,7 +1198,11 @@ program
 
       const bundlePath = findBundle(distDir, platform);
       if (!bundlePath) {
-        console.warn(`  ${c.yellow}⚠${c.reset}   no bundle found for ${platform}, skipping`);
+        printWarningBox(
+          `No bundle found for ${platform}`,
+          `Expected bundle at ./dist/_expo/static/js/${platform}/ or ./dist/index.${platform}.hbc`,
+          `If this platform is not supported in your app, ignore this or pass -p <platform>.`
+        );
         continue;
       }
 
@@ -974,12 +1216,18 @@ program
         platform,
         bundleHash,
         timestamp:      Date.now(),
-        assetCount:     assets.length,
+        assets:         mediaAssets.map(a => ({
+          hash:          a.hash,
+          key:           a.key,
+          fileExtension: path.extname(a.localPath),
+          contentType:   a.contentType
+        })),
+        assetCount:     mediaAssets.length,
         publicKey:      appCfg.publicKey,
       };
       const payloadStr = JSON.stringify(payloadObj);
 
-      spin.start("signing");
+      spin.start("signing bundle hash");
       const signature = await signPayload(payloadStr, privateKey);
       spin.stop(`signed  ${c.dim}${signature.slice(0, 20)}…${c.reset}`);
 
@@ -988,7 +1236,7 @@ program
         continue;
       }
 
-      spin.start("uploading");
+      spin.start("uploading release to server");
       const bundleBuffer = fs.readFileSync(bundlePath);
       const form = new FormData();
       form.append("bundle",    new Blob([bundleBuffer], { type: "application/javascript" }), `bundle-${platform}.hbc`);
@@ -996,31 +1244,67 @@ program
       form.append("signature", signature);
       form.append("platform",  platform);
 
-      const response = await fetch(uploadUrl, {
-        method:  "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(projectId ? { "X-Project-Id": projectId } : {})
-        },
-        body: form,
-      }).catch(e => {
-        spin.fail(`Upload failed: ${e.message}`);
+      let response: Response;
+      try {
+        response = await fetch(uploadUrl, {
+          method:  "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(projectId ? { "X-Project-Id": projectId } : {})
+          },
+          body: form,
+        });
+      } catch (uploadNetErr: any) {
+        spin.fail("Upload connection failed");
+        const diag = diagnoseNetworkError(uploadNetErr, serverUrl);
+        printErrorBox(diag.title, diag.reason, diag.solution);
         process.exit(1);
-      });
+      }
 
       if (!response.ok) {
         const text = await response.text();
-        spin.fail(`Upload failed (HTTP ${response.status}): ${text}`);
+        spin.fail(`Upload failed (HTTP ${response.status})`);
+        if (response.status === 401) {
+          printErrorBox(
+            "Authentication expired",
+            "Your session token is no longer valid.",
+            `Run ${c.cyan}edge-ota login${c.reset} to refresh your credentials.`
+          );
+        } else if (response.status === 403) {
+          printErrorBox(
+            "Permission denied",
+            text || `You do not have permission to publish updates to project ${projectId}.`,
+            `Check your team role on ${c.bold}https://ota.renbo.site${c.reset} or verify API key permissions.`
+          );
+        } else if (response.status === 404) {
+          printErrorBox(
+            "Project not found on server",
+            `Project ID "${projectId}" was not found at ${serverUrl}.`,
+            `Run ${c.cyan}edge-ota init${c.reset} to re-associate with an existing project or create a new one.`
+          );
+        } else if (response.status === 413) {
+          printErrorBox(
+            "Payload too large",
+            "The bundle file exceeds server upload size limits.",
+            "Consider optimizing your bundle, removing large embedded media, or adjusting server body limit."
+          );
+        } else {
+          printErrorBox(`Server returned HTTP ${response.status}`, text, "Check server logs or try again shortly.");
+        }
         process.exit(1);
       }
 
       const body = await response.json().catch(() => ({})) as any;
       spin.stop("uploaded");
 
+      const runtimesDisplay = body.runtimeVersions ? body.runtimeVersions.join(", ") : runtimeVersion;
       console.log(`  ${c.green}✓${c.reset}  deployed`);
       console.log(`  id         ${c.dim}${body.updateId || "—"}${c.reset}`);
       console.log(`  channel    ${options.channel}`);
-      console.log(`  runtime    ${runtimeVersion}`);
+      console.log(`  runtime(s) ${runtimesDisplay}`);
+      if (mediaAssets.length > 0) {
+        console.log(`  assets     ${mediaAssets.length} static asset(s) linked`);
+      }
     }
 
     console.log(`\n${sep}`);
@@ -1035,14 +1319,23 @@ program
 
 program
   .command("status")
-  .description("List recent deployments for this project")
+  .description("List recent deployments and active release status for this project")
   .option("-n, --limit <n>", "Number of releases to show", "10")
+  .addHelpText("after", `
+${c.bold}Examples:${c.reset}
+  $ ${c.cyan}edge-ota status${c.reset}                         Show the last 10 releases
+  $ ${c.cyan}edge-ota status -n 25${c.reset}                   Show the last 25 releases
+`)
   .action(async (options) => {
     printBanner();
 
     const token = resolveToken();
     if (!token) {
-      console.error(`  ${c.red}✗${c.reset}  Not logged in. Run ${c.cyan}edge-ota login${c.reset} first.\n`);
+      printErrorBox(
+        "Not logged in",
+        "Authentication is required to query release status.",
+        `Run ${c.cyan}edge-ota login${c.reset} first.`
+      );
       process.exit(1);
     }
 
@@ -1053,15 +1346,25 @@ program
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
     if (projectId) headers["x-project-id"] = projectId;
 
-    spin.start("fetching releases");
+    spin.start("fetching releases from server");
 
-    const res = await fetch(`${serverUrl}/api/releases`, { headers }).catch(e => {
-      spin.fail(`Connection failed: ${e.message}`);
+    let res: Response;
+    try {
+      res = await fetch(`${serverUrl}/api/releases`, { headers });
+    } catch (e: any) {
+      spin.fail("Connection failed");
+      const diag = diagnoseNetworkError(e, serverUrl);
+      printErrorBox(diag.title, diag.reason, diag.solution);
       process.exit(1);
-    });
+    }
 
     if (!res.ok) {
       spin.fail(`Failed to fetch releases (HTTP ${res.status})`);
+      printErrorBox(
+        `Server returned HTTP ${res.status}`,
+        res.statusText,
+        `Verify that project "${projectId}" exists and your token has view permissions.`
+      );
       process.exit(1);
     }
 
@@ -1069,7 +1372,8 @@ program
     spin.stop();
 
     if (!releases.length) {
-      console.log(`  ${c.dim}No releases found.${c.reset}\n`);
+      console.log(`  ${c.dim}No releases found for project "${projectId}".${c.reset}`);
+      console.log(`  Run ${c.cyan}edge-ota push${c.reset} to publish your first OTA release!\n`);
       process.exit(0);
     }
 
@@ -1083,6 +1387,7 @@ program
     }));
 
     console.table(rows);
+    console.log();
     process.exit(0);
   });
 
@@ -1092,18 +1397,26 @@ program
 
 program
   .command("keygen")
-  .description("Generate a fresh ECDSA P-256 key pair (prints to stdout, does not write files)")
+  .description("Generate a fresh ECDSA P-256 key pair for code signing")
+  .addHelpText("after", `
+${c.bold}What to do with these keys:${c.reset}
+  1. ${c.bold}Private Key:${c.reset} Store securely in ${c.dim}~/.config/edge-ota/keys/<projectId>.key${c.reset}
+     or set in your CI/CD secrets for automated pushes.
+  2. ${c.bold}Public Key:${c.reset}  Save in your project settings on the dashboard (${DEFAULT_SERVER})
+     or paste into ${c.dim}app.json${c.reset} under ${c.dim}expo.extra.edgeOtaPublicKey${c.reset}.
+`)
   .action(async () => {
     const keys = await generateECDSAKeyPair();
-    const sep  = `${c.dim}${"─".repeat(52)}${c.reset}`;
+    const sep  = `${c.dim}${"─".repeat(56)}${c.reset}`;
     console.log(`\n${sep}`);
-    console.log(`  ${c.bold}private key${c.reset}  ${c.dim}keep secret — never commit${c.reset}`);
+    console.log(`  ${c.bold}PRIVATE KEY${c.reset}  ${c.red}(Keep Secret — Never Commit to Git)${c.reset}`);
     console.log(sep);
     console.log(keys.privateKey);
     console.log(`\n${sep}`);
-    console.log(`  ${c.bold}public key${c.reset}   ${c.dim}paste into dashboard → Settings → General${c.reset}`);
+    console.log(`  ${c.bold}PUBLIC KEY${c.reset}   ${c.green}(Paste into Dashboard → Settings → Code Signing)${c.reset}`);
     console.log(sep);
     console.log(keys.publicKey);
+    console.log(`${sep}\n`);
     process.exit(0);
   });
 
