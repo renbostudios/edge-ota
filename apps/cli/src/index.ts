@@ -584,10 +584,11 @@ function selectOption<T>(
 // ─── Asset collection ─────────────────────────────────────────────────────────
 
 interface AssetEntry {
-  localPath:   string;
-  key:         string;
-  contentType: string;
-  hash:        string;
+  localPath:     string;
+  key:           string;
+  contentType:   string;
+  hash:          string;
+  fileExtension: string;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -617,6 +618,27 @@ async function hashFile(filePath: string): Promise<string> {
 
 async function collectAssets(distDir: string): Promise<AssetEntry[]> {
   const entries: AssetEntry[] = [];
+  const extMap: Record<string, string> = {};
+
+  const metadataPath = path.join(distDir, "metadata.json");
+  if (fs.existsSync(metadataPath)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metadataPath, "utf-8"));
+      if (meta.fileMetadata) {
+        for (const p of Object.keys(meta.fileMetadata)) {
+          const pMeta = meta.fileMetadata[p];
+          if (Array.isArray(pMeta.assets)) {
+            for (const a of pMeta.assets) {
+              if (a.path && a.ext) {
+                const normPath = a.path.replace(/\\/g, "/");
+                extMap[normPath] = a.ext.startsWith(".") ? a.ext.toLowerCase() : `.${a.ext.toLowerCase()}`;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
 
   function walk(dir: string) {
     for (const name of fs.readdirSync(dir)) {
@@ -624,12 +646,17 @@ async function collectAssets(distDir: string): Promise<AssetEntry[]> {
       if (fs.statSync(full).isDirectory()) {
         walk(full);
       } else {
-        const ext = path.extname(name).toLowerCase();
+        const relKey = path.relative(distDir, full).replace(/\\/g, "/");
+        let ext = path.extname(name).toLowerCase();
+        if (!ext && extMap[relKey]) {
+          ext = extMap[relKey];
+        }
         entries.push({
-          localPath:   full,
-          key:         path.relative(distDir, full).replace(/\\/g, "/"),
-          contentType: CONTENT_TYPES[ext] || "application/octet-stream",
-          hash:        ""
+          localPath:     full,
+          key:           relKey,
+          fileExtension: ext,
+          contentType:   CONTENT_TYPES[ext] || "application/octet-stream",
+          hash:          ""
         });
       }
     }
@@ -1219,7 +1246,7 @@ ${c.bold}How It Works:${c.reset}
         assets:         mediaAssets.map(a => ({
           hash:          a.hash,
           key:           a.key,
-          fileExtension: path.extname(a.localPath),
+          fileExtension: a.fileExtension || path.extname(a.localPath) || "",
           contentType:   a.contentType
         })),
         assetCount:     mediaAssets.length,

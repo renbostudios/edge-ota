@@ -1851,13 +1851,16 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
     const protocol = (req.headers["x-forwarded-proto"] as string) || (req.secure ? "https" : "http");
     const parsedMetadata = typeof row.metadata === "string" ? JSON.parse(row.metadata || "{}") : (row.metadata || {});
     const rawAssets = Array.isArray(parsedMetadata.assets) ? parsedMetadata.assets : [];
-    const formattedAssets = rawAssets.map((a: any) => ({
-      hash: a.hash,
-      key: a.key || a.hash,
-      fileExtension: a.fileExtension || (a.key ? path.extname(a.key) : "") || ".bin",
-      contentType: a.contentType || "application/octet-stream",
-      url: `${protocol}://${req.get("host")}/api/assets/${a.hash}${a.fileExtension || (a.key ? path.extname(a.key) : "")}`
-    }));
+    const formattedAssets = rawAssets.map((a: any) => {
+      const ext = a.fileExtension || (a.key ? path.extname(a.key) : "") || "";
+      return {
+        hash: a.hash,
+        key: a.key || a.hash,
+        fileExtension: ext,
+        contentType: a.contentType || "application/octet-stream",
+        url: `${protocol}://${req.get("host")}/api/assets/${a.hash}${ext}`
+      };
+    });
 
     const manifest = generateExpoManifest({
       updateId: row.id,
@@ -1946,6 +1949,21 @@ async function pruneOldReleases(projectId: string, keepLimit = 10): Promise<void
     // 3. Run Filesystem Garbage Collection (GC)
     const referencedHashes = await queryAll("SELECT DISTINCT bundle_hash FROM updates");
     const activeHashes = new Set(referencedHashes.map(r => r.bundle_hash));
+
+    // Crucial: also retain all referenced static assets from updates metadata
+    const allUpdates = await queryAll("SELECT metadata FROM updates");
+    for (const row of allUpdates) {
+      if (row.metadata) {
+        try {
+          const meta = typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata;
+          if (Array.isArray(meta.assets)) {
+            for (const a of meta.assets) {
+              if (a && a.hash) activeHashes.add(a.hash);
+            }
+          }
+        } catch {}
+      }
+    }
 
     if (fs.existsSync(UPLOADS_DIR)) {
       const files = fs.readdirSync(UPLOADS_DIR);
