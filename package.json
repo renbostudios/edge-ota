@@ -1,14 +1,18 @@
 {
   "name": "@renbostudios/edge-ota",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "preferGlobal": true,
   "description": "Zero-SDK, self-hostable OTA update CLI for Expo — push signed JS bundles to any EdgeOTA server",
   "license": "MIT",
   "author": "EdgeOTA Contributors",
   "homepage": "https://github.com/renbostudios/edge-ota-cli",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/renbostudios/edge-ota-cli.git"
+    "url": "https://github.com/itskodaaa/edge-ota.git",
+    "directory": "apps/cli"
   },
   "bugs": {
     "url": "https://github.com/renbostudios/edge-ota-cli/issues"
@@ -31,18 +35,19 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "commander": "^12.1.0",
-    "archiver": "^7.0.1"
+    "archiver": "^7.0.1",
+    "commander": "^12.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.5",
+    "@types/archiver": "^6.0.2",
     "@types/node": "^20.12.12",
-    "@types/archiver": "^6.0.2"
+    "tsup": "^8.5.1",
+    "typescript": "^5.4.5"
   }
 }
