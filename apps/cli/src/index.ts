@@ -1243,12 +1243,15 @@ ${c.bold}How It Works:${c.reset}
         platform,
         bundleHash,
         timestamp:      Date.now(),
-        assets:         mediaAssets.map(a => ({
-          hash:          a.hash,
-          key:           a.key,
-          fileExtension: a.fileExtension || path.extname(a.localPath) || "",
-          contentType:   a.contentType
-        })),
+        assets:         mediaAssets.map(a => {
+          const ext = a.fileExtension || path.extname(a.localPath) || "";
+          return {
+            hash:          a.hash,
+            key:           path.basename(a.key, ext),
+            fileExtension: ext,
+            contentType:   a.contentType
+          };
+        }),
         assetCount:     mediaAssets.length,
         publicKey:      appCfg.publicKey,
       };

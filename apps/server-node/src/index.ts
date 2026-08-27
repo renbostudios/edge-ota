@@ -1853,9 +1853,10 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
     const rawAssets = Array.isArray(parsedMetadata.assets) ? parsedMetadata.assets : [];
     const formattedAssets = rawAssets.map((a: any) => {
       const ext = a.fileExtension || (a.key ? path.extname(a.key) : "") || "";
+      const cleanKey = path.basename(a.key || a.hash, ext);
       return {
         hash: a.hash,
-        key: a.key || a.hash,
+        key: cleanKey,
         fileExtension: ext,
         contentType: a.contentType || "application/octet-stream",
         url: `${protocol}://${req.get("host")}/api/assets/${a.hash}${ext}`
