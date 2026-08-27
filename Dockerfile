@@ -10,8 +10,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/core/package.json ./packages/core/
 COPY apps/server-node/package.json ./apps/server-node/
 
-# Install dependencies (including devDependencies to compile TypeScript)
-RUN pnpm install --no-frozen-lockfile
+# Install dependencies (including devDependencies to compile TypeScript and native better-sqlite3)
+RUN pnpm config set enable-pre-post-scripts true && pnpm install --no-frozen-lockfile
 
 # Copy workspace source files
 COPY packages/core ./packages/core
