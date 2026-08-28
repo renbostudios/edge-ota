@@ -1787,6 +1787,14 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
   }
 
   const ip = (req.headers["x-forwarded-for"] as string) || req.ip || req.socket.remoteAddress || "127.0.0.1";
+  const fatalError = req.headers["expo-fatal-error"] as string;
+  const currentUpdateId = req.headers["expo-current-update-id"] as string;
+  const embeddedUpdateId = req.headers["expo-embedded-update-id"] as string;
+
+  if (fatalError) {
+    console.error(`[OTA Crash Report] Device ${ip} (platform=${platform}) reported fatal error: ${fatalError}`);
+  }
+  console.log(`[OTA Request] project=${projectId} platform=${platform} runtime=${runtimeVersion} channel=${channel} currentUpdate=${currentUpdateId || 'none'} embeddedUpdate=${embeddedUpdateId || 'none'}`);
 
   try {
     // 1. Fetch channel configuration
