@@ -1251,7 +1251,8 @@ app.post("/api/releases/:id/rollback", authenticateSession, async (req, res) => 
           deployedBy: "Console Rollback",
           rolledBackFrom: id,
           platform: target.platform || "all",
-          assets: targetMetadata.assets || []
+          assets: targetMetadata.assets || [],
+          extra: targetMetadata.extra || (targetMetadata.expoClient ? { expoClient: targetMetadata.expoClient } : {})
         })
       ]
     );
