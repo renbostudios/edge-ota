@@ -1235,7 +1235,8 @@ app.post("/api/releases/:id/rollback", authenticateSession, async (req, res) => 
  
     const nextId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
- 
+    const targetMetadata = typeof target.metadata === "string" ? JSON.parse(target.metadata || "{}") : (target.metadata || {});
+
     await runCommand(
       "INSERT INTO updates (id, project_id, created_at, runtime_version, channel, bundle_hash, platform, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
@@ -1246,10 +1247,20 @@ app.post("/api/releases/:id/rollback", authenticateSession, async (req, res) => 
         target.channel,
         target.bundle_hash,
         target.platform || "all",
-        JSON.stringify({ deployedBy: "Console Rollback", rolledBackFrom: id, platform: target.platform || "all" })
+        JSON.stringify({
+          deployedBy: "Console Rollback",
+          rolledBackFrom: id,
+          platform: target.platform || "all",
+          assets: targetMetadata.assets || []
+        })
       ]
     );
- 
+
+    await runCommand(
+      "UPDATE channels SET active_release_id = ? WHERE id = ? AND project_id = ?",
+      [nextId, target.channel, projectId]
+    );
+
     res.json({ id: nextId, status: "success" });
   } catch (err) {
     res.status(500).send("Internal Server Error");

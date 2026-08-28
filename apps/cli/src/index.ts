@@ -685,9 +685,10 @@ function findBundle(distDir: string, platform: string): string | null {
 // ─── Auth token resolution ────────────────────────────────────────────────────
 
 function resolveToken(): string | null {
+  if (process.env.EDGE_OTA_TOKEN) return process.env.EDGE_OTA_TOKEN;
   const cfg = loadGlobalConfig();
   if (cfg?.token) return cfg.token;
-  return process.env.EDGE_OTA_TOKEN || null;
+  return null;
 }
 
 // ─── Program ─────────────────────────────────────────────────────────────────
