@@ -1882,6 +1882,8 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
       };
     });
 
+    const extraConfig = parsedMetadata.extra || (parsedMetadata.expoClient ? { expoClient: parsedMetadata.expoClient } : {});
+
     const manifest = generateExpoManifest({
       updateId: row.id,
       createdAt: row.created_at,
@@ -1890,7 +1892,8 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
       bundleHash: row.bundle_hash,
       bundleKey: row.bundle_hash.slice(0, 32),
       assets: formattedAssets,
-      metadata: parsedMetadata
+      metadata: parsedMetadata,
+      extra: extraConfig
     });
 
     // ── Manifest signing ────────────────────────────────────────────────────
@@ -2124,7 +2127,8 @@ const handlePostUpdates = async (req: express.Request, res: express.Response) =>
       platform: updatePlatform,
       assets: Array.isArray(payload.assets) ? payload.assets : [],
       assetCount: (payload.assets && payload.assets.length) || payload.assetCount || 0,
-      uploadedAt: createdAt
+      uploadedAt: createdAt,
+      extra: (payload as any).extra || {}
     };
     const metadataString = JSON.stringify(metadataObj);
 

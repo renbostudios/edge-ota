@@ -317,6 +317,7 @@ interface AppJsonConfig {
   projectId:      string | null;
   runtimeVersion: string;
   publicKey?:     string;
+  expoConfig?:    Record<string, any>;
 }
 
 function readAppJson(cwd: string): AppJsonConfig {
@@ -348,45 +349,48 @@ function readAppJson(cwd: string): AppJsonConfig {
   const expo = data?.expo ?? {};
 
   // ── Runtime version ──
-  let runtimeVersion = expo.runtimeVersion;
-  if (!runtimeVersion) {
+  let runtimeVersion: string | undefined;
+
+  if (typeof expo.runtimeVersion === "string") {
+    runtimeVersion = expo.runtimeVersion;
+  } else if (
+    typeof expo.runtimeVersion === "object" &&
+    expo.runtimeVersion !== null &&
+    expo.runtimeVersion.policy === "appVersion"
+  ) {
+    if (typeof expo.version === "string") {
+      runtimeVersion = expo.version;
+    } else {
+      printErrorBox(
+        "Missing expo.version in app.json",
+        `"expo.runtimeVersion.policy" is set to "appVersion", but "expo.version" is not defined in app.json.`,
+        `Add ${c.cyan}"version": "1.0.0"${c.reset} to your ${c.bold}app.json${c.reset} under ${c.dim}"expo"${c.reset}.`
+      );
+      process.exit(1);
+    }
+  } else if (!expo.runtimeVersion) {
     printErrorBox(
       "Missing expo.runtimeVersion in app.json",
-      "Expo Updates requires a runtimeVersion to ensure native compatibility between the app binary and JS bundle.",
+      `No "runtimeVersion" field found under "expo" in app.json.`,
       [
         `Add a fixed version string in ${c.bold}app.json${c.reset} under ${c.dim}"expo"${c.reset}: ${c.cyan}"runtimeVersion": "1.0.0"${c.reset}`,
-        `Or use an Expo policy helper: ${c.cyan}"runtimeVersion": { "policy": "appVersion" }${c.reset}`
+        `Or use the appVersion policy: ${c.cyan}"runtimeVersion": { "policy": "appVersion" }${c.reset}`
       ]
     );
     process.exit(1);
-  }
-
-  // Resolve runtimeVersion object (e.g. policy helper) to string
-  if (typeof runtimeVersion === "object" && runtimeVersion !== null) {
-    const policy = (runtimeVersion as any).policy;
-    if (policy === "appVersion") {
-      runtimeVersion = expo.version;
-    } else if (policy === "sdkVersion") {
-      runtimeVersion = expo.sdkVersion;
-    } else {
-      runtimeVersion = expo.version || expo.sdkVersion;
-    }
-  }
-
-  if (!runtimeVersion || typeof runtimeVersion !== "string") {
+  } else {
     printErrorBox(
-      "Could not resolve runtimeVersion",
+      "Unsupported expo.runtimeVersion in app.json",
       `expo.runtimeVersion in app.json resolved to: ${JSON.stringify(runtimeVersion)}`,
       [
-        `If using ${c.dim}"policy": "appVersion"${c.reset}, make sure ${c.bold}"expo.version"${c.reset} (e.g. "1.0.0") is defined in app.json.`,
-        `If using ${c.dim}"policy": "sdkVersion"${c.reset}, make sure ${c.bold}"expo.sdkVersion"${c.reset} (e.g. "52.0.0") is defined.`,
-        `Or simply specify a static string: ${c.cyan}"runtimeVersion": "1.0.0"${c.reset}`
+        `EdgeOTA requires either a string (e.g. "1.0.0") or { "policy": "appVersion" }.`,
+        `If using ${c.dim}"policy": "appVersion"${c.reset}, make sure ${c.bold}"expo.version"${c.reset} (e.g. "1.0.0") is defined in app.json.`
       ]
     );
     process.exit(1);
   }
 
-  // ── Updates URL ──
+  // ── Updates URL + Project ID ──
   const updatesUrl: string = expo?.updates?.url ?? "";
   if (!updatesUrl) {
     printErrorBox(
@@ -428,7 +432,13 @@ function readAppJson(cwd: string): AppJsonConfig {
     serverUrl = projectServer.replace(/\/$/, "");
   }
 
-  return { serverUrl, projectId, runtimeVersion, publicKey: expo?.extra?.edgeOtaPublicKey };
+  return {
+    serverUrl,
+    projectId,
+    runtimeVersion,
+    publicKey: expo?.extra?.edgeOtaPublicKey,
+    expoConfig: expo
+  };
 }
 
 function updateAppJson(cwd: string, serverUrl: string, projectId?: string, publicKey?: string) {
@@ -1255,6 +1265,9 @@ ${c.bold}How It Works:${c.reset}
         }),
         assetCount:     mediaAssets.length,
         publicKey:      appCfg.publicKey,
+        extra: {
+          expoClient: appCfg.expoConfig || {}
+        }
       };
       const payloadStr = JSON.stringify(payloadObj);
 
