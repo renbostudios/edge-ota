@@ -1,5 +1,8 @@
 # Workspace configuration
 /.agents
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 
 # Node Dependencies
 node_modules
