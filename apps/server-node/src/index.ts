@@ -111,7 +111,9 @@ await execBatch(`
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
     public_key TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    plan TEXT DEFAULT 'free',
+    trial_ends_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS updates (
@@ -274,6 +276,14 @@ try {
 } catch (e: any) {
   console.warn("[Database] Index creation warning:", e.message);
 }
+
+// Add plan and trial_ends_at columns to projects table if they do not exist
+try {
+  await runCommand("ALTER TABLE projects ADD COLUMN plan TEXT DEFAULT 'free'");
+} catch (_) {}
+try {
+  await runCommand("ALTER TABLE projects ADD COLUMN trial_ends_at TEXT");
+} catch (_) {}
 
 // Secure password hashing using scrypt with random salt
 function hashPassword(password: string): string {
@@ -1131,10 +1141,80 @@ app.get("/api/projects", authenticateSession, async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const projects = await queryAll(
-      "SELECT id, name, public_key, created_at FROM projects WHERE user_id = ? ORDER BY created_at DESC",
+      "SELECT id, name, public_key, created_at, plan, trial_ends_at FROM projects WHERE user_id = ? ORDER BY created_at DESC",
       [userId]
     );
     res.json(projects);
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// Billing Status & 30-Day Free Upgrade
+app.get("/api/billing/status", authenticateSession, async (req, res) => {
+  try {
+    const projectId = await getValidatedProjectId(req);
+    const project = await queryOne("SELECT id, name, plan, trial_ends_at FROM projects WHERE id = ?", [projectId]);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    let plan = project.plan || "free";
+    let isTrial = false;
+    let daysRemaining = 0;
+    let trialEndsAt = project.trial_ends_at || null;
+
+    if (plan === "pro" && trialEndsAt) {
+      const endsTime = new Date(trialEndsAt).getTime();
+      const now = Date.now();
+      if (endsTime < now) {
+        // Expired trial, revert to free
+        plan = "free";
+        trialEndsAt = null;
+        await runCommand("UPDATE projects SET plan = 'free', trial_ends_at = NULL WHERE id = ?", [projectId]);
+      } else {
+        isTrial = true;
+        daysRemaining = Math.max(1, Math.ceil((endsTime - now) / (1000 * 60 * 60 * 24)));
+      }
+    }
+
+    res.json({
+      plan,
+      isTrial,
+      daysRemaining,
+      trialEndsAt,
+      mauLimit: plan === "pro" ? 250000 : 20000,
+      bandwidthLimit: plan === "pro" ? 10000 : 200
+    });
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/api/billing/upgrade", authenticateSession, async (req, res) => {
+  try {
+    const projectId = await getValidatedProjectId(req);
+    const project = await queryOne("SELECT id, name FROM projects WHERE id = ?", [projectId]);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await runCommand(
+      "UPDATE projects SET plan = 'pro', trial_ends_at = ? WHERE id = ?",
+      [thirtyDaysFromNow, projectId]
+    );
+
+    res.json({
+      success: true,
+      plan: "pro",
+      isTrial: true,
+      daysRemaining: 30,
+      trialEndsAt: thirtyDaysFromNow,
+      message: "Pro plan upgraded successfully! 30-day complimentary access activated."
+    });
   } catch (err) {
     res.status(500).send("Internal Server Error");
   }

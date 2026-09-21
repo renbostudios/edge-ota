@@ -13,6 +13,8 @@ node_modules
 .svelte-kit
 build
 dist
+apps/cli/bin
+**/bin/
 
 # Cloudflare Wrangler Local State
 .wrangler
