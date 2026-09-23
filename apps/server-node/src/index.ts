@@ -263,6 +263,25 @@ if (!usePostgres) {
   } catch (err) {
     console.error("[Migration] SQLite channels table composite PK migration failed:", err);
   }
+} else {
+  try {
+    const pkRes = await queryAll(`
+      SELECT kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      WHERE tc.table_name = 'channels' AND tc.constraint_type = 'PRIMARY KEY'
+    `);
+    const pkCols = pkRes.map((r: any) => r.column_name);
+    if (pkCols.length === 1 && pkCols[0] === 'id') {
+      console.log("[Migration] Upgrading Postgres 'channels' table to composite primary key (id, project_id)...");
+      await runCommand("ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_pkey");
+      await runCommand("ALTER TABLE channels ADD PRIMARY KEY (id, project_id)");
+    }
+  } catch (err) {
+    console.warn("[Migration] Postgres channels composite PK check:", err);
+  }
 }
 
 // Add performance indexes

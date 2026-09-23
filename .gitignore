@@ -54,3 +54,7 @@ pnpm-debug.log*
 # Vercel Cache & Build Artifacts
 .vercel
 .vercel/
+
+# Migration scripts & local utilities
+*migrate-to-neon.mjs
+scripts/migrate-*.mjs
