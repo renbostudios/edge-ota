@@ -7,11 +7,21 @@ import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { generateExpoManifest, createExpoHeaders, verifyPayload } from "@renbostudios/edge-ota-core";
-
-// Conduit Mail Service Configuration
-const CONDUIT_API_BASE = process.env.CONDUIT_API_BASE || "https://api.conduit.renbo.site";
-const CONDUIT_API_KEY = process.env.CONDUIT_API_KEY || "";
-const CONDUIT_CHANNEL_ID = process.env.CONDUIT_CHANNEL_ID || "bceb1d1b-8a03-4f56-a68f-2e1f91e613d0";
+import {
+  sendOtpEmail,
+  sendPasswordResetOtpEmail,
+  sendPasswordChangedEmail,
+  sendWelcomeEmail,
+  sendInviteEmail,
+  sendInviteAcceptedEmail,
+  sendMemberRemovedEmail,
+  sendProTrialActivatedEmail,
+  sendProTrialExpiredEmail,
+  sendApiKeyAlertEmail,
+  sendPublicKeyUpdatedEmail,
+  sendProductionDeployEmail,
+  sendFatalCrashAlertEmail,
+} from "./emails.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -362,301 +372,23 @@ async function verifyOtp(email: string, code: string): Promise<boolean> {
   return true;
 }
 
-async function sendOtpEmail(email: string, code: string): Promise<boolean> {
-  if (!CONDUIT_API_KEY) {
-    console.warn("[OTP] No CONDUIT_API_KEY configured — skipping email send");
-    return false;
-  }
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0;padding:0;background-color:#000000;font-family:'Courier New',Courier,monospace;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#000000;padding:40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="480" cellpadding="0" cellspacing="0" style="background-color:#0A0A0A;border:1px solid #333333;">
-          <!-- Header -->
-          <tr>
-            <td style="padding:32px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:14px;color:#FFFFFF;font-weight:bold;letter-spacing:1px;">
-                    &#9618; Edge-OTA
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Divider -->
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="border-top:1px solid #333333;font-size:0;line-height:0;">&nbsp;</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Title -->
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#555555;text-transform:uppercase;letter-spacing:2px;">
-                    EMAIL VERIFICATION
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Message -->
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:13px;color:#FFFFFF;line-height:20px;">
-                    A verification code was requested for your account.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- OTP Code Box -->
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="background-color:#000000;border:1px solid #333333;padding:20px 24px;text-align:center;">
-                    <table width="100%" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#555555;text-transform:uppercase;letter-spacing:2px;text-align:center;padding-bottom:12px;">
-                          YOUR CODE
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style="font-family:'Courier New',Courier,monospace;font-size:32px;color:#FFFFFF;letter-spacing:8px;text-align:center;font-weight:bold;">
-                          ${code}
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Expiry Note -->
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#555555;line-height:18px;">
-                    This code expires in 10 minutes.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Divider -->
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="border-top:1px solid #333333;font-size:0;line-height:0;">&nbsp;</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 32px 32px 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#555555;line-height:16px;">
-                    If you did not request this, you can safely ignore this email.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
+async function getProjectRecipients(projectId: string): Promise<{ ownerEmail: string; projectName: string; teamCc: string[] }> {
   try {
-    const response = await fetch(`${CONDUIT_API_BASE}/api/v1/send`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${CONDUIT_API_KEY}`,
-      },
-      body: JSON.stringify({
-        to: email,
-        channel: "email",
-        subject: "Verify your email — Edge-OTA",
-        message: html,
-        sessionId: CONDUIT_CHANNEL_ID,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`[OTP] Conduit API error: ${response.status} — ${text}`);
-      return false;
-    }
-    console.log(`[OTP] Verification email sent to ${email}`);
-    return true;
-  } catch (err: any) {
-    console.error(`[OTP] Failed to send email: ${err.message}`);
-    return false;
-  }
-}
-
-async function sendInviteEmail(email: string, inviterEmail: string, projectName: string, inviteToken: string): Promise<boolean> {
-  if (!CONDUIT_API_KEY) {
-    console.warn("[Invite] No CONDUIT_API_KEY configured — skipping invite email send");
-    return false;
-  }
-
-  const acceptUrl = `${process.env.DASHBOARD_URL || "https://ota.renbo.site"}/team/accept?token=${inviteToken}`;
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0;padding:0;background-color:#000000;font-family:'Courier New',Courier,monospace;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#000000;padding:40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="480" cellpadding="0" cellspacing="0" style="background-color:#0A0A0A;border:1px solid #333333;">
-          <tr>
-            <td style="padding:32px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:14px;color:#FFFFFF;font-weight:bold;letter-spacing:1px;">
-                    &#9618; Edge-OTA
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr><td style="border-top:1px solid #333333;font-size:0;line-height:0;">&nbsp;</td></tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#555555;text-transform:uppercase;letter-spacing:2px;">
-                    TEAM INVITATION
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:13px;color:#FFFFFF;line-height:20px;">
-                    <strong style="color:#81C784;">${inviterEmail}</strong> has invited you to join the project <strong style="color:#FFAA00;">${projectName}</strong> on Edge-OTA.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center" style="background-color:#81C784;padding:14px 24px;">
-                    <a href="${acceptUrl}" style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#000000;text-decoration:none;font-weight:bold;letter-spacing:1px;display:block;">
-                      ACCEPT INVITATION
-                    </a>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#555555;line-height:18px;">
-                    Or copy this link: <span style="color:#81C784;word-break:break-all;">${acceptUrl}</span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr><td style="border-top:1px solid #333333;font-size:0;line-height:0;">&nbsp;</td></tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 32px 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#555555;line-height:16px;">
-                    This invitation expires in 7 days. If you did not expect this, you can safely ignore this email.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
-  try {
-    const response = await fetch(`${CONDUIT_API_BASE}/api/v1/send`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${CONDUIT_API_KEY}`,
-      },
-      body: JSON.stringify({
-        to: email,
-        channel: "email",
-        subject: `You're invited to ${projectName} — Edge-OTA`,
-        message: html,
-        sessionId: CONDUIT_CHANNEL_ID,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`[Invite] Conduit API error: ${response.status} — ${text}`);
-      return false;
-    }
-    console.log(`[Invite] Invitation email sent to ${email}`);
-    return true;
-  } catch (err: any) {
-    console.error(`[Invite] Failed to send email: ${err.message}`);
-    return false;
+    const project = await queryOne("SELECT name, user_id FROM projects WHERE id = ?", [projectId]);
+    const owner = project?.user_id ? await queryOne("SELECT email FROM users WHERE id = ?", [project.user_id]) : null;
+    const members = await queryAll(
+      "SELECT email FROM team_members WHERE project_id = ? AND status = 'accepted'",
+      [projectId]
+    );
+    const ownerEmail = owner?.email || "";
+    const teamCc = members.map((m: any) => m.email).filter((e: string) => e && e !== ownerEmail);
+    return {
+      ownerEmail,
+      projectName: project?.name || "Default Project",
+      teamCc,
+    };
+  } catch {
+    return { ownerEmail: "", projectName: "Default Project", teamCc: [] };
   }
 }
 
@@ -1078,14 +810,19 @@ app.post("/api/auth/verify-otp", async (req, res) => {
       return;
     }
 
-    // Mark email as verified
-    await runCommand("UPDATE users SET email_verified = 1 WHERE email = ?", [email]);
-
-    // Issue session token
     const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
     if (!user) {
       res.status(404).send("User not found");
       return;
+    }
+
+    const wasUnverified = user.email_verified === 0;
+
+    // Mark email as verified
+    await runCommand("UPDATE users SET email_verified = 1 WHERE email = ?", [email]);
+
+    if (wasUnverified) {
+      sendWelcomeEmail(user.email).catch(err => console.error("[Email] Welcome email failed:", err));
     }
 
     const token = crypto.randomBytes(32).toString("hex");
@@ -1142,6 +879,86 @@ app.post("/api/auth/resend-otp", async (req, res) => {
   }
 });
 
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email || !isValidEmail(email)) {
+    res.status(400).send("Valid email address is required");
+    return;
+  }
+
+  const ip = (req.headers["x-forwarded-for"] as string) || req.ip || "127.0.0.1";
+  if (!checkRateLimit(`forgot-pwd-ip:${ip}`, 10, 15 * 60 * 1000) || !checkRateLimit(`forgot-pwd:${email}`, 3, 10 * 60 * 1000)) {
+    res.status(429).send("Too many password reset requests. Please wait a few minutes.");
+    return;
+  }
+
+  try {
+    const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
+    // Always return 200 to prevent account enumeration, but only send OTP if account exists
+    if (user) {
+      const otpCode = generateOtp();
+      await storeOtp(email, otpCode);
+      await sendPasswordResetOtpEmail(email, otpCode);
+    }
+    res.json({ message: "If an account exists with this email, a 6-digit recovery code has been dispatched." });
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    res.status(400).send("Email, recovery code, and new password are required");
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    res.status(400).send("Invalid email format");
+    return;
+  }
+
+  if (typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    res.status(400).send("Invalid 6-digit recovery code");
+    return;
+  }
+
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    res.status(400).send("New password must be at least 8 characters");
+    return;
+  }
+
+  if (!checkRateLimit(`reset-pwd:${email}`, 10, 10 * 60 * 1000)) {
+    res.status(429).send("Too many reset attempts. Please request a new code.");
+    return;
+  }
+
+  try {
+    const valid = await verifyOtp(email, code);
+    if (!valid) {
+      res.status(400).send("Invalid or expired recovery code");
+      return;
+    }
+
+    const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
+    if (!user) {
+      res.status(404).send("Account not found");
+      return;
+    }
+
+    const passwordHash = hashPassword(newPassword);
+    await runCommand("UPDATE users SET password_hash = ?, email_verified = 1 WHERE id = ?", [passwordHash, user.id]);
+    // Revoke all previous sessions for security
+    await runCommand("DELETE FROM sessions WHERE user_id = ?", [user.id]);
+
+    sendPasswordChangedEmail(email).catch(err => console.error("[Email] Password changed alert failed:", err));
+
+    res.json({ message: "Password updated successfully. You may now sign in." });
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
 app.get("/api/auth/me", authenticateSession, async (req, res) => {
   try {
     const user = await queryOne("SELECT email, email_verified FROM users WHERE id = ?", [(req as any).user.id]);
@@ -1159,9 +976,15 @@ app.get("/api/auth/me", authenticateSession, async (req, res) => {
 app.get("/api/projects", authenticateSession, async (req, res) => {
   try {
     const userId = (req as any).user.id;
+    const user = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+    const userEmail = user?.email || "";
     const projects = await queryAll(
-      "SELECT id, name, public_key, created_at, plan, trial_ends_at FROM projects WHERE user_id = ? ORDER BY created_at DESC",
-      [userId]
+      `SELECT DISTINCT p.id, p.name, p.public_key, p.created_at, p.plan, p.trial_ends_at
+       FROM projects p
+       LEFT JOIN team_members tm ON tm.project_id = p.id
+       WHERE p.user_id = ? OR (tm.email = ? AND tm.status = 'accepted')
+       ORDER BY p.created_at DESC`,
+      [userId, userEmail]
     );
     res.json(projects);
   } catch (err) {
@@ -1192,6 +1015,11 @@ app.get("/api/billing/status", authenticateSession, async (req, res) => {
         plan = "free";
         trialEndsAt = null;
         await runCommand("UPDATE projects SET plan = 'free', trial_ends_at = NULL WHERE id = ?", [projectId]);
+        getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+          if (ownerEmail) {
+            sendProTrialExpiredEmail(ownerEmail, projectName, teamCc).catch(err => console.error("[Email] Trial expired email failed:", err));
+          }
+        }).catch(() => {});
       } else {
         isTrial = true;
         daysRemaining = Math.max(1, Math.ceil((endsTime - now) / (1000 * 60 * 60 * 24)));
@@ -1225,6 +1053,12 @@ app.post("/api/billing/upgrade", authenticateSession, async (req, res) => {
       "UPDATE projects SET plan = 'pro', trial_ends_at = ? WHERE id = ?",
       [thirtyDaysFromNow, projectId]
     );
+
+    getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+      if (ownerEmail) {
+        sendProTrialActivatedEmail(ownerEmail, projectName, thirtyDaysFromNow, teamCc).catch(err => console.error("[Email] Pro trial activated email failed:", err));
+      }
+    }).catch(() => {});
 
     res.json({
       success: true,
@@ -1268,16 +1102,28 @@ app.put("/api/projects/:id", authenticateSession, async (req, res) => {
   }
 
   try {
-    const existing = await queryOne("SELECT id FROM projects WHERE id = ? AND user_id = ?", [id, (req as any).user.id]);
+    const existing = await queryOne("SELECT id, name, public_key FROM projects WHERE id = ? AND user_id = ?", [id, (req as any).user.id]);
     if (!existing) {
       res.status(404).send("Project not found or unauthorized");
       return;
     }
 
+    const nextPublicKey = publicKey || "";
+    const keyChanged = (existing.public_key || "") !== nextPublicKey;
+
     await runCommand(
       "UPDATE projects SET name = ?, public_key = ? WHERE id = ?",
-      [name, publicKey || "", id]
+      [name, nextPublicKey, id]
     );
+
+    if (keyChanged) {
+      getProjectRecipients(id).then(({ ownerEmail, teamCc }) => {
+        if (ownerEmail) {
+          sendPublicKeyUpdatedEmail(ownerEmail, name, teamCc).catch(err => console.error("[Email] Public key updated alert failed:", err));
+        }
+      }).catch(() => {});
+    }
+
     res.json({ message: "Project updated successfully" });
   } catch (err) {
     res.status(500).send("Internal Server Error");
@@ -1360,6 +1206,20 @@ app.post("/api/releases/:id/rollback", authenticateSession, async (req, res) => 
       "UPDATE channels SET active_release_id = ? WHERE id = ? AND project_id = ?",
       [nextId, target.channel, projectId]
     );
+
+    getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+      if (ownerEmail) {
+        sendProductionDeployEmail(ownerEmail, projectName, {
+          releaseId: nextId,
+          channel: target.channel || "production",
+          runtimes: [target.runtime_version],
+          platform: target.platform || "all",
+          bundleHash: target.bundle_hash,
+          isRollback: true,
+          rolledBackFrom: id,
+        }, teamCc).catch(err => console.error("[Email] Rollback alert failed:", err));
+      }
+    }).catch(() => {});
 
     res.json({ id: nextId, status: "success" });
   } catch (err) {
@@ -1612,6 +1472,7 @@ app.post("/api/keys", authenticateSession, async (req, res) => {
   }
 
   try {
+    const userId = (req as any).user.id;
     const keyId = crypto.randomUUID();
     const token = "eota_prod_" + crypto.randomBytes(16).toString("hex");
     const secretHash = crypto.createHash("sha256").update(token).digest("hex");
@@ -1620,8 +1481,14 @@ app.post("/api/keys", authenticateSession, async (req, res) => {
 
     await runCommand(
       "INSERT INTO api_keys (id, user_id, label, prefix, secret_hash, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [keyId, (req as any).user.id, label, prefix, secretHash, scope || "push_updates", createdAt]
+      [keyId, userId, label, prefix, secretHash, scope || "push_updates", createdAt]
     );
+
+    queryOne("SELECT email FROM users WHERE id = ?", [userId]).then(user => {
+      if (user?.email) {
+        sendApiKeyAlertEmail(user.email, "created", label, prefix, scope || "push_updates").catch(err => console.error("[Email] API key created alert failed:", err));
+      }
+    }).catch(() => {});
 
     res.status(201).json({
       id: keyId,
@@ -1639,13 +1506,21 @@ app.post("/api/keys", authenticateSession, async (req, res) => {
 app.delete("/api/keys/:id", authenticateSession, async (req, res) => {
   const { id } = req.params;
   try {
-    const key = await queryOne("SELECT * FROM api_keys WHERE id = ? AND user_id = ?", [id, (req as any).user.id]);
+    const userId = (req as any).user.id;
+    const key = await queryOne("SELECT * FROM api_keys WHERE id = ? AND user_id = ?", [id, userId]);
     if (!key) {
       res.status(404).send("API key not found");
       return;
     }
 
     await runCommand("DELETE FROM api_keys WHERE id = ?", [id]);
+
+    queryOne("SELECT email FROM users WHERE id = ?", [userId]).then(user => {
+      if (user?.email) {
+        sendApiKeyAlertEmail(user.email, "revoked", key.label, key.prefix, key.scope || "push_updates").catch(err => console.error("[Email] API key revoked alert failed:", err));
+      }
+    }).catch(() => {});
+
     res.json({ message: "API key revoked successfully" });
   } catch (err) {
     res.status(500).send("Internal Server Error");
@@ -1656,12 +1531,12 @@ app.delete("/api/keys/:id", authenticateSession, async (req, res) => {
 app.get("/api/team/members", authenticateSession, async (req, res) => {
   const projectId = await getValidatedProjectId(req);
   try {
+    const project = await queryOne("SELECT user_id FROM projects WHERE id = ?", [projectId]);
+    const owner = project ? await queryOne("SELECT email FROM users WHERE id = ?", [project.user_id]) : null;
     const members = await queryAll(
-      "SELECT id, email, role, status, invited_at, accepted_at FROM team_members WHERE project_id = ? AND owner_user_id = ? ORDER BY invited_at DESC",
-      [projectId, (req as any).user.id]
+      "SELECT id, email, role, status, invited_at, accepted_at FROM team_members WHERE project_id = ? ORDER BY invited_at DESC",
+      [projectId]
     );
-    // Prepend the owner as the first member
-    const owner = await queryOne("SELECT email FROM users WHERE id = ?", [(req as any).user.id]);
     const result = [
       { id: "owner", email: owner?.email || "", role: "Owner", status: "Active", invited_at: null, accepted_at: null },
       ...members
@@ -1694,6 +1569,12 @@ app.post("/api/team/invite", authenticateSession, async (req, res) => {
   }
 
   try {
+    const { ownerEmail, projectName, teamCc } = await getProjectRecipients(projectId);
+    if (ownerEmail && email.toLowerCase() === ownerEmail.toLowerCase()) {
+      res.status(400).send("This user is already the project owner");
+      return;
+    }
+
     // Check if already invited
     const existing = await queryOne(
       "SELECT id FROM team_members WHERE project_id = ? AND email = ? AND status = 'pending'",
@@ -1730,17 +1611,61 @@ app.post("/api/team/invite", authenticateSession, async (req, res) => {
       [memberId, projectId, userId, email, assignedRole, inviteToken, now]
     );
 
-    // Get project name and inviter email for the email
-    const project = await queryOne("SELECT name FROM projects WHERE id = ?", [projectId]);
     const inviter = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+    const inviterEmail = inviter?.email || ownerEmail || "a team member";
+    const ccRecipients = Array.from(new Set([ownerEmail, ...teamCc].filter(Boolean)));
 
-    const sent = await sendInviteEmail(email, inviter?.email || "a team member", project?.name || "your project", inviteToken);
+    const sent = await sendInviteEmail(email, inviterEmail, projectName, assignedRole, inviteToken, ccRecipients);
 
     if (!sent) {
       console.warn(`[Invite] Email failed to send to ${email} — invite created but email not delivered`);
     }
 
-    res.status(201).json({ id: memberId, email, role: assignedRole, status: "pending", invited_at: now });
+    res.status(201).json({ id: memberId, email, role: assignedRole, status: "pending", invited_at: now, emailSent: sent });
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.get("/api/team/invite-info", async (req, res) => {
+  const token = req.query.token as string;
+  const email = req.query.email as string;
+
+  if (!token || !email || typeof token !== "string" || token.length !== 64 || !isValidEmail(email)) {
+    res.status(400).send("Invalid invitation link parameters");
+    return;
+  }
+
+  try {
+    const invite = await queryOne(
+      "SELECT * FROM team_members WHERE invite_token = ? AND email = ? AND status = 'pending'",
+      [token, email]
+    );
+    if (!invite) {
+      res.status(404).send("Invitation not found or already accepted");
+      return;
+    }
+
+    const invitedAt = new Date(invite.invited_at).getTime();
+    if (Date.now() > invitedAt + 7 * 24 * 60 * 60 * 1000) {
+      await runCommand("DELETE FROM team_members WHERE id = ?", [invite.id]);
+      res.status(400).send("This invitation has expired");
+      return;
+    }
+
+    const project = await queryOne("SELECT name FROM projects WHERE id = ?", [invite.project_id]);
+    const inviter = await queryOne("SELECT email FROM users WHERE id = ?", [invite.owner_user_id]);
+    const existingUser = await queryOne("SELECT id FROM users WHERE email = ?", [email]);
+
+    res.json({
+      email: invite.email,
+      role: invite.role,
+      projectId: invite.project_id,
+      projectName: project?.name || "Edge-OTA Project",
+      inviterEmail: inviter?.email || "Project Owner",
+      existingAccount: Boolean(existingUser),
+      invitedAt: invite.invited_at,
+    });
   } catch (err) {
     res.status(500).send("Internal Server Error");
   }
@@ -1788,7 +1713,9 @@ app.post("/api/team/accept-invite", async (req, res) => {
 
     // Check if user exists, if not create account
     let user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
+    let isNewUser = false;
     if (!user) {
+      isNewUser = true;
       const userId = crypto.randomUUID();
       const passwordHash = hashPassword(password);
       await runCommand("INSERT INTO users (id, email, password_hash, email_verified) VALUES (?, ?, ?, 1)", [userId, email, passwordHash]);
@@ -1799,6 +1726,9 @@ app.post("/api/team/accept-invite", async (req, res) => {
         res.status(401).send("Invalid password for existing account");
         return;
       }
+      if (user.email_verified === 0) {
+        await runCommand("UPDATE users SET email_verified = 1 WHERE id = ?", [user.id]);
+      }
     }
 
     // Mark invite as accepted
@@ -1807,7 +1737,79 @@ app.post("/api/team/accept-invite", async (req, res) => {
       [new Date().toISOString(), invite.id]
     );
 
-    res.json({ message: "Invitation accepted", projectId: invite.project_id });
+    // Issue session token so invited user lands directly in the console
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    await runCommand(
+      "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+      [sessionToken, user.id, new Date().toISOString(), expiresAt]
+    );
+
+    const { ownerEmail, projectName, teamCc } = await getProjectRecipients(invite.project_id);
+    if (ownerEmail) {
+      sendInviteAcceptedEmail(
+        ownerEmail,
+        email,
+        projectName,
+        invite.role,
+        teamCc.filter(cc => cc.toLowerCase() !== email.toLowerCase())
+      ).catch(err => console.error("[Email] Invite accepted alert failed:", err));
+    }
+    if (isNewUser) {
+      sendWelcomeEmail(email).catch(err => console.error("[Email] Welcome email failed:", err));
+    }
+
+    res.json({
+      message: "Invitation accepted",
+      token: sessionToken,
+      email: user.email,
+      projectId: invite.project_id,
+      projectName
+    });
+  } catch (err) {
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/api/team/members/:id/resend", authenticateSession, async (req, res) => {
+  const { id } = req.params;
+  const projectId = await getValidatedProjectId(req);
+  const userId = (req as any).user.id;
+
+  if (!checkRateLimit(`invite-resend:${id}`, 1, 2 * 60 * 1000)) {
+    res.status(429).send("Please wait 2 minutes before resending this invitation.");
+    return;
+  }
+
+  try {
+    const member = await queryOne(
+      "SELECT * FROM team_members WHERE id = ? AND project_id = ? AND status = 'pending'",
+      [id, projectId]
+    );
+    if (!member) {
+      res.status(404).send("Pending invitation not found");
+      return;
+    }
+
+    const inviteToken = crypto.randomBytes(32).toString("hex");
+    const now = new Date().toISOString();
+    await runCommand(
+      "UPDATE team_members SET invite_token = ?, invited_at = ? WHERE id = ?",
+      [inviteToken, now, id]
+    );
+
+    const { ownerEmail, projectName, teamCc } = await getProjectRecipients(projectId);
+    const inviter = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+    const inviterEmail = inviter?.email || ownerEmail || "a team member";
+    const ccRecipients = Array.from(new Set([ownerEmail, ...teamCc].filter(Boolean)));
+
+    const sent = await sendInviteEmail(member.email, inviterEmail, projectName, member.role, inviteToken, ccRecipients);
+    if (!sent) {
+      res.status(500).send("Failed to resend invitation email");
+      return;
+    }
+
+    res.json({ message: "Invitation resent successfully", invited_at: now });
   } catch (err) {
     res.status(500).send("Internal Server Error");
   }
@@ -1819,15 +1821,21 @@ app.delete("/api/team/members/:id", authenticateSession, async (req, res) => {
   const userId = (req as any).user.id;
 
   try {
+    const project = await queryOne("SELECT user_id FROM projects WHERE id = ?", [projectId]);
     const member = await queryOne(
-      "SELECT id FROM team_members WHERE id = ? AND project_id = ? AND owner_user_id = ?",
-      [id, projectId, userId]
+      "SELECT * FROM team_members WHERE id = ? AND project_id = ?",
+      [id, projectId]
     );
-    if (!member) {
+    if (!member || (project?.user_id !== userId && member.owner_user_id !== userId)) {
       res.status(404).send("Team member not found or unauthorized");
       return;
     }
     await runCommand("DELETE FROM team_members WHERE id = ?", [id]);
+
+    getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+      sendMemberRemovedEmail(member.email, projectName, ownerEmail, teamCc).catch(err => console.error("[Email] Member removed email failed:", err));
+    }).catch(() => {});
+
     res.json({ message: "Team member removed" });
   } catch (err) {
     res.status(500).send("Internal Server Error");
@@ -1893,6 +1901,19 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
 
   if (fatalError) {
     console.error(`[OTA Crash Report] Device ${ip} (platform=${platform}) reported fatal error: ${fatalError}`);
+    if (projectId !== "default-project" && checkRateLimit(`crash-email:${projectId}`, 1, 10 * 60 * 1000)) {
+      getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+        if (ownerEmail) {
+          sendFatalCrashAlertEmail(ownerEmail, projectName, {
+            channel,
+            runtimeVersion,
+            platform,
+            fatalError,
+            currentUpdateId,
+          }, teamCc).catch(err => console.error("[Email] Fatal crash alert failed:", err));
+        }
+      }).catch(() => {});
+    }
   }
   console.log(`[OTA Request] project=${projectId} platform=${platform} runtime=${runtimeVersion} channel=${channel} currentUpdate=${currentUpdateId || 'none'} embeddedUpdate=${embeddedUpdateId || 'none'}`);
 
@@ -2281,6 +2302,21 @@ const handlePostUpdates = async (req: express.Request, res: express.Response) =>
     }
 
     console.log(`[OTA] ✅  Update ${createdUpdateIds[0]} published → project=${projectId} channel=${payload.channel} runtimes=[${runtimes.join(", ")}] platform=${updatePlatform}`);
+
+    if (projectId !== "default-project" && payload.channel === "production") {
+      getProjectRecipients(projectId).then(({ ownerEmail, projectName, teamCc }) => {
+        if (ownerEmail) {
+          sendProductionDeployEmail(ownerEmail, projectName, {
+            releaseId: createdUpdateIds[0],
+            channel: payload.channel,
+            runtimes,
+            platform: updatePlatform,
+            bundleHash,
+            isRollback: false,
+          }, teamCc).catch(err => console.error("[Email] Production deploy alert failed:", err));
+        }
+      }).catch(() => {});
+    }
 
     // Run garbage collection asynchronously to prune old releases and clean orphaned files
     pruneOldReleases(projectId).catch(err => console.error("[GC] Error running background prune:", err.message));
