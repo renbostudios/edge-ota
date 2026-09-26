@@ -5,17 +5,17 @@
   "description": "Core manifest, crypto, and OTA protocol utilities for EdgeOTA",
   "license": "MIT",
   "author": "EdgeOTA Contributors",
-  "homepage": "https://github.com/renbostudios/edge-ota-cli",
+  "homepage": "https://ota.renbo.site",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/itskodaaa/edge-ota.git",
+    "url": "https://github.com/renbostudios/edge-ota.git",
     "directory": "packages/core"
   },
   "bugs": {
-    "url": "https://github.com/renbostudios/edge-ota-cli/issues"
+    "url": "https://github.com/renbostudios/edge-ota/issues"
   },
   "keywords": ["expo", "ota", "updates", "react-native", "edge"],
   "type": "module",

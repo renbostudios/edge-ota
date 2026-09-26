@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://ota.renbo.site">
-    <img src="assets/banner.png" alt="EdgeOTA — Zero-SDK OTA Engine for Expo" width="100%">
+    <img src="assets/banner-hero.png" alt="EdgeOTA — Zero-SDK OTA Engine for Expo" width="100%">
   </a>
 </p>
 

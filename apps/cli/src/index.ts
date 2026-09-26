@@ -721,7 +721,7 @@ ${c.bold}Quick Start:${c.reset}
 ${c.bold}Documentation & Support:${c.reset}
   Website:       https://ota.renbo.site
   Studio:        https://renbostudios.com
-  GitHub:        https://github.com/renbostudios/edge-ota-cli
+  GitHub:        https://github.com/renbostudios/edge-ota
 `);
 
 // Show help + auth status when called with no arguments
