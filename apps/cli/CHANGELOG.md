@@ -1,5 +1,11 @@
 # @renbostudios/edge-ota
 
+## 0.4.3
+
+### Patch Changes
+
+- a46c96e: Update package repository URLs to renbostudios/edge-ota, overhaul README documentation, and refresh branding assets.
+
 ## 0.4.2
 
 ### Patch Changes
