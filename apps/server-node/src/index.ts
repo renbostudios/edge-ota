@@ -406,6 +406,17 @@ function checkRateLimit(key: string, maxAttempts: number, windowMs: number): boo
   return true;
 }
 
+/** Coarse network bucket so rotating addresses inside one allocation is capped. */
+function getRateLimitSubnet(ip: string): string {
+  const normalized = ip.replace(/^::ffff:/, '');
+  if (normalized.includes(':')) {
+    return normalized.split(':').slice(0, 4).join(':') + '::/64';
+  }
+  const parts = normalized.split('.');
+  if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+  return normalized;
+}
+
 // Periodic cleanup to prevent unbounded memory growth
 setInterval(() => {
   const now = Date.now();
@@ -766,6 +777,13 @@ function hashSessionToken(token: string): string {
 // Authentication API Endpoints
 app.post("/api/auth/signup", async (req, res) => {
   const { email, password } = req.body;
+
+  // Honeypot: a real client never fills this hidden field.
+  if (typeof req.body.website === "string" && req.body.website.trim().length > 0) {
+    res.json({ message: "Verification code sent to your email", email, requiresVerification: true });
+    return;
+  }
+
   if (!email || !password) {
     res.status(400).send("Email and password are required");
     return;
@@ -785,6 +803,10 @@ app.post("/api/auth/signup", async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   if (!checkRateLimit(`signup:${ip}`, 5, 10 * 60 * 1000)) {
     res.status(429).send("Too many signup attempts. Please try again later.");
+    return;
+  }
+  if (!checkRateLimit(`signup-net:${getRateLimitSubnet(ip)}`, 10, 10 * 60 * 1000)) {
+    res.status(429).send("Too many signup attempts from this network. Please try again later.");
     return;
   }
 
