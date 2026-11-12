@@ -184,6 +184,18 @@ async function handleGetManifest(request: Request, env: Env): Promise<Response> 
 // ─────────────────────────────────────────────────────────────────────────────
 async function handlePostUpdate(request: Request, env: Env): Promise<Response> {
   try {
+    // Bound the request before buffering it in memory.
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (Number.isFinite(contentLength) && contentLength > 512 * 1024 * 1024) {
+      return new Response("Payload too large (max 512 MB)", { status: 413 });
+    }
+
+    // Uploads are signed, not anonymous. Without a configured public key
+    // there is no way to authenticate a publisher, so fail closed.
+    if (!env.PUBLIC_KEY) {
+      return new Response("Uploads are disabled: PUBLIC_KEY is not configured", { status: 503 });
+    }
+
     const formData = await request.formData();
     const bundleFile    = formData.get("bundle")    as File | null;
     const payloadString = formData.get("payload")   as string | null;
@@ -198,11 +210,9 @@ async function handlePostUpdate(request: Request, env: Env): Promise<Response> {
     }
 
     // ── Verify ECDSA signature ─────────────────────────────────────────────
-    if (env.PUBLIC_KEY) {
-      const isValid = await verifyPayload(payloadString, signature, env.PUBLIC_KEY);
-      if (!isValid) {
-        return new Response("Invalid signature — ECDSA verification failed", { status: 401 });
-      }
+    const isValid = await verifyPayload(payloadString, signature, env.PUBLIC_KEY);
+    if (!isValid) {
+      return new Response("Invalid signature — ECDSA verification failed", { status: 401 });
     }
 
     const payload = JSON.parse(payloadString) as {
@@ -214,15 +224,32 @@ async function handlePostUpdate(request: Request, env: Env): Promise<Response> {
       assetCount?:    number;
     };
 
-    if (typeof payload.runtimeVersion !== "string") {
-      return new Response("Invalid runtimeVersion: must be a string. Please upgrade your CLI to the latest version of @renbostudios/edge-ota.", { status: 400 });
+    if (typeof payload.runtimeVersion !== "string" || !/^[a-zA-Z0-9._-]{1,32}$/.test(payload.runtimeVersion)) {
+      return new Response("Invalid runtimeVersion. Please upgrade your CLI to the latest version of @renbostudios/edge-ota.", { status: 400 });
+    }
+    if (typeof payload.channel !== "string" || !/^[a-zA-Z0-9._-]{1,64}$/.test(payload.channel)) {
+      return new Response("Invalid channel", { status: 400 });
+    }
+    if (typeof payload.bundleHash !== "string" || !/^[a-f0-9]{64}$/i.test(payload.bundleHash)) {
+      return new Response("Invalid bundleHash: expected a 64-character SHA-256 hex digest", { status: 400 });
     }
 
-    const updatePlatform = platform || payload.platform || "all";
-    const bundleHash     = payload.bundleHash;
+    const updatePlatform = ["ios", "android", "all", "web"].includes(String(platform || payload.platform || "all").toLowerCase())
+      ? String(platform || payload.platform || "all").toLowerCase()
+      : "all";
+    const bundleHash = payload.bundleHash.toLowerCase();
+
+    // ── The uploaded file must match the signed payload ────────────────────
+    const bundleArrayBuffer = await bundleFile.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", bundleArrayBuffer);
+    const actualHash = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    if (actualHash !== bundleHash) {
+      return new Response("Bundle hash mismatch: file content does not match the signed payload", { status: 400 });
+    }
 
     // ── Store bundle in R2 (content-addressed) ─────────────────────────────
-    const bundleArrayBuffer = await bundleFile.arrayBuffer();
     const r2Key = `assets/${bundleHash}`;
 
     // Only store if not already present (deduplication)
@@ -291,8 +318,8 @@ async function handlePostUpdate(request: Request, env: Env): Promise<Response> {
       { status: 200, headers: { "content-type": "application/json" } }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal Server Error";
-    return new Response(message, { status: 500 });
+    console.error("[Worker] Upload error:", error);
+    return new Response("Internal Server Error", { status: 500 });
   }
 }
 
@@ -303,8 +330,8 @@ async function handleGetAsset(request: Request, env: Env): Promise<Response> {
   const url  = new URL(request.url);
   const hash = url.pathname.split("/").pop();
 
-  if (!hash) {
-    return new Response("Hash missing", { status: 400 });
+  if (!hash || !/^[a-f0-9]{64}$/i.test(hash)) {
+    return new Response("Invalid asset hash", { status: 400 });
   }
 
   const object = await env.BUCKET.get(`assets/${hash}`);
