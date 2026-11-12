@@ -297,6 +297,61 @@ async function checkAndAutoUpdate() {
   }
 }
 
+// ─── Domain migration notice (ota.renbo.site → ota.renbo.dev) ─────────────────
+
+const MIGRATION_NOTICE_FILE = path.join(GLOBAL_CONFIG_DIR, "domain-migration-notice.json");
+
+function getServerHost(serverUrl?: string): string {
+  try {
+    return new URL(serverUrl || DEFAULT_SERVER).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isLegacyEdgeOtaHost(serverUrl?: string): boolean {
+  const host = getServerHost(serverUrl);
+  return host === getServerHost(LEGACY_SERVER) || host.endsWith(".ota.renbo.site");
+}
+
+/**
+ * Informs the user about the renbo.dev migration.
+ * - Legacy API host in the saved config → shown on every run (actionable).
+ * - Already migrated → shown at most once every 24h (informational).
+ */
+function maybeNotifyDomainMigration(serverUrl?: string) {
+  try {
+    const legacy = isLegacyEdgeOtaHost(serverUrl);
+
+    if (!legacy) {
+      const now = Date.now();
+      let lastShown = 0;
+      try {
+        lastShown = JSON.parse(fs.readFileSync(MIGRATION_NOTICE_FILE, "utf-8")).lastShown || 0;
+      } catch { /* first run */ }
+      if (now - lastShown < 24 * 60 * 60 * 1000) return;
+      fs.mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
+      fs.writeFileSync(MIGRATION_NOTICE_FILE, JSON.stringify({ lastShown: now }));
+    }
+
+    const sep = `${c.dim}${"─".repeat(56)}${c.reset}`;
+    console.log(`\n${sep}`);
+    console.log(`  ${c.yellow}▲${c.reset}  ${c.bold}EdgeOTA has moved to ${c.green}renbo.dev${c.reset}`);
+    if (legacy) {
+      console.log(`  ${c.dim}saved server:${c.reset} ${c.red}${getServerHost(serverUrl)}${c.reset} ${c.dim}(legacy)${c.reset}`);
+      console.log(`  ${c.dim}Switch with:${c.reset}   ${c.cyan}edge-ota login${c.reset} ${c.dim}(new default: ${DEFAULT_SERVER})${c.reset}`);
+    } else {
+      console.log(`  ${c.dim}dashboard:${c.reset}    ${c.cyan}${DASHBOARD_URL}${c.reset}`);
+      console.log(`  ${c.dim}api:${c.reset}          ${c.cyan}${DEFAULT_SERVER}${c.reset}`);
+    }
+    console.log(`  ${c.dim}The legacy API stays online — existing apps keep receiving updates.${c.reset}`);
+    console.log(`  ${c.dim}Guide:${c.reset}        ${c.cyan}${DASHBOARD_URL}/migration${c.reset}`);
+    console.log(`${sep}\n`);
+  } catch {
+    // A notice must never break a command
+  }
+}
+
 // ─── Banner ───────────────────────────────────────────────────────────────────
 
 function printBanner() {
@@ -310,7 +365,9 @@ function printBanner() {
 
 // ─── app.json helpers ────────────────────────────────────────────────────────
 
-const DEFAULT_SERVER = "https://api.ota.renbo.site";
+const DEFAULT_SERVER = "https://api.ota.renbo.dev";
+const LEGACY_SERVER = "https://api.ota.renbo.site";
+const DASHBOARD_URL = "https://ota.renbo.dev";
 
 interface AppJsonConfig {
   serverUrl:      string;
@@ -398,7 +455,7 @@ function readAppJson(cwd: string): AppJsonConfig {
       "Your app is not configured to receive updates from an EdgeOTA server.",
       [
         `Run ${c.cyan}edge-ota init${c.reset} in this directory to automatically configure your project.`,
-        `Or manually add under ${c.dim}"expo.updates"${c.reset}: ${c.cyan}"url": "https://api.ota.renbo.site/api/projects/<project-id>/updates"${c.reset}`
+        `Or manually add under ${c.dim}"expo.updates"${c.reset}: ${c.cyan}"url": "https://api.ota.renbo.dev/api/projects/<project-id>/updates"${c.reset}`
       ]
     );
     process.exit(1);
@@ -705,6 +762,18 @@ function resolveToken(): string | null {
 
 const program = new Command();
 
+let migrationNoticeShown = false;
+
+function notifyDomainMigrationOnce(serverUrl?: string) {
+  if (migrationNoticeShown) return;
+  migrationNoticeShown = true;
+  maybeNotifyDomainMigration(serverUrl);
+}
+
+program.hook("preAction", () => {
+  notifyDomainMigrationOnce(loadGlobalConfig()?.serverUrl);
+});
+
 program
   .name("edge-ota")
   .description("Zero-SDK, self-hostable OTA update platform for Expo — by Renbo Studios")
@@ -719,7 +788,8 @@ ${c.bold}Quick Start:${c.reset}
   4. ${c.cyan}edge-ota push${c.reset}                        Export and publish your first OTA update
 
 ${c.bold}Documentation & Support:${c.reset}
-  Website:       https://ota.renbo.site
+  Website:       https://ota.renbo.dev
+  Migration:     https://ota.renbo.dev/migration  ${c.dim}(moved from ota.renbo.site)${c.reset}
   Studio:        https://renbostudios.com
   GitHub:        https://github.com/renbostudios/edge-ota
 `);
@@ -728,6 +798,7 @@ ${c.bold}Documentation & Support:${c.reset}
 program.action(() => {
   printBanner();
   const cfg = loadGlobalConfig();
+  notifyDomainMigrationOnce(cfg?.serverUrl);
   if (cfg?.email) {
     console.log(`  ${c.green}●${c.reset}  Logged in as ${c.bold}${cfg.email}${c.reset}  ${c.dim}(${cfg.serverUrl})${c.reset}`);
   } else {
@@ -801,7 +872,7 @@ ${c.bold}CI/CD Environments:${c.reset}
             text || "The credentials provided were rejected by the server.",
             [
               `Check your email and password for typos.`,
-              `If you don't have an account yet, register at ${c.bold}https://ota.renbo.site${c.reset}`,
+              `If you don't have an account yet, register at ${c.bold}https://ota.renbo.dev${c.reset}`,
               `If using self-hosted server, verify ${c.bold}${serverUrl}${c.reset} is correct.`
             ]
           );
@@ -1103,6 +1174,12 @@ ${c.bold}How It Works:${c.reset}
     const { serverUrl, projectId } = appCfg;
     const runtimeVersion = options.runtime || appCfg.runtimeVersion;
 
+    if (isLegacyEdgeOtaHost(serverUrl)) {
+      console.log(`  ${c.yellow}▲${c.reset}  ${c.dim}app.json still targets the legacy server:${c.reset} ${c.red}${serverUrl}${c.reset}`);
+      console.log(`     ${c.dim}This push will work (legacy API stays online), but new installs should use:${c.reset} ${c.cyan}${DEFAULT_SERVER}${c.reset}`);
+      console.log(`     ${c.dim}Update ${c.reset}expo.updates.url${c.dim} + ${c.reset}expo.extra.edgeOtaServer${c.dim}, then run ${c.reset}${c.cyan}npx expo prebuild --clean${c.reset}\n`);
+    }
+
     // Load private signing key
     const privateKey = projectId ? loadPrivateKey(projectId) : null;
     if (!privateKey) {
@@ -1318,7 +1395,7 @@ ${c.bold}How It Works:${c.reset}
           printErrorBox(
             "Permission denied",
             text || `You do not have permission to publish updates to project ${projectId}.`,
-            `Check your team role on ${c.bold}https://ota.renbo.site${c.reset} or verify API key permissions.`
+            `Check your team role on ${c.bold}https://ota.renbo.dev${c.reset} or verify API key permissions.`
           );
         } else if (response.status === 404) {
           printErrorBox(

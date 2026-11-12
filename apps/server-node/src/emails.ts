@@ -4,7 +4,7 @@
 const CONDUIT_API_BASE = process.env.CONDUIT_API_BASE || "https://api.conduit.renbo.site";
 const CONDUIT_API_KEY = process.env.CONDUIT_API_KEY || "";
 const CONDUIT_CHANNEL_ID = process.env.CONDUIT_CHANNEL_ID || "bceb1d1b-8a03-4f56-a68f-2e1f91e613d0";
-const DASHBOARD_URL = (process.env.DASHBOARD_URL || "https://ota.renbo.site").replace(/\/$/, "");
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || "https://ota.renbo.dev").replace(/\/$/, "");
 
 export interface ConduitEmailOptions {
   to: string;
@@ -867,5 +867,72 @@ export async function sendFatalCrashAlertEmail(
     html,
     tag: "FatalCrashAlert",
     cc: ccEmails,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Platform migration email (ota.renbo.site → ota.renbo.dev)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function sendDomainMigrationEmail(email: string): Promise<boolean> {
+  const fontStack = "'Share Tech Mono', 'Geist Mono', 'Courier New', Courier, monospace";
+
+  const bodyHtml = `
+    <p style="margin:0 0 16px 0;color:#CCCCCC;">
+      EdgeOTA has a new home: <strong style="color:#81C784;">renbo.dev</strong>. The old
+      <span style="color:#777777;">ota.renbo.site</span> domain keeps running, so nothing is broken
+      and no published update has been lost &mdash; but you should move your bookmarks and project URLs
+      over when you have two minutes.
+    </p>
+    ${renderKeyValueBox([
+      { label: "Dashboard", value: "https://ota.renbo.dev", highlight: "green" },
+      { label: "API", value: "https://api.ota.renbo.dev" },
+      { label: "Legacy API", value: "https://api.ota.renbo.site", highlight: "amber" },
+      { label: "Legacy status", value: "Online · still serving devices" },
+    ])}
+    <p style="margin:20px 0 10px 0;color:#CCCCCC;">Three things to update:</p>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#000000;border:1px solid #2A2A2A;padding:16px;">
+      <tr>
+        <td style="font-family:${fontStack};font-size:10px;color:#81C784;text-transform:uppercase;letter-spacing:1.5px;padding-bottom:10px;font-weight:bold;">
+          // MIGRATION CHECKLIST
+        </td>
+      </tr>
+      <tr>
+        <td style="font-family:${fontStack};font-size:12px;color:#FFFFFF;line-height:24px;">
+          <span style="color:#FFAA00;">1.</span> Sign in at
+          <a href="${DASHBOARD_URL}/login" style="color:#81C784;text-decoration:underline;">ota.renbo.dev</a> and update your bookmark.<br>
+          <span style="color:#FFAA00;">2.</span> In your Expo app, set
+          <span style="color:#81C784;">expo.updates.url</span> to
+          <span style="color:#FFFFFF;">https://api.ota.renbo.dev/api/projects/&lt;projectId&gt;/updates</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;and <span style="color:#81C784;">expo.extra.edgeOtaServer</span> to
+          <span style="color:#FFFFFF;">https://api.ota.renbo.dev</span>, then run
+          <span style="color:#FFFFFF;">npx expo prebuild --clean</span>.<br>
+          <span style="color:#FFAA00;">3.</span> Refresh the CLI:
+          <span style="color:#FFFFFF;">npm i -g @renbostudios/edge-ota@latest &amp;&amp; edge-ota login</span>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:20px 0 0 0;color:#777777;font-size:11px;line-height:18px;">
+      Shipping a new native build is only required for the URL change to reach new installs.
+      Devices already running your app keep updating through the legacy endpoint, and the CLI keeps
+      pushing to it until you switch.
+    </p>`;
+
+  const html = renderBrandEmailLayout({
+    preheader: "EdgeOTA now lives at ota.renbo.dev — the legacy domain stays online. Here is the 2-minute migration.",
+    category: "PLATFORM MIGRATION",
+    statusBadge: "NOTICE // RENBO.DEV",
+    accent: "amber",
+    heading: "EDGE-OTA HAS MOVED TO RENBO.DEV",
+    bodyHtml,
+    ctaLabel: "VIEW MIGRATION GUIDE",
+    ctaUrl: `${DASHBOARD_URL}/migration`,
+    footerNote: "Question or stuck mid-migration? Reply to this email or reach us at hello@renbostudios.com.",
+  });
+
+  return sendConduitEmail({
+    to: email,
+    subject: "EdgeOTA has moved to renbo.dev — 2-minute migration",
+    html,
+    tag: "DomainMigration",
   });
 }

@@ -554,6 +554,11 @@ app.use((req, res, next) => {
     origin && (
       origin.startsWith("http://localhost:") ||
       origin.startsWith("http://127.0.0.1:") ||
+      // Current domain (primary)
+      origin.endsWith(".renbo.dev") ||
+      origin === "https://renbo.dev" ||
+      // Legacy domain — kept during the ota.renbo.site migration so existing
+      // dashboards/CLI sessions never hit a CORS wall.
       origin.endsWith(".renbo.site") ||
       origin === "https://renbo.site" ||
       allowedOrigins.includes(origin)

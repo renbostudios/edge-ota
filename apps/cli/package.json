@@ -5,7 +5,7 @@
   "description": "Zero-SDK, self-hostable OTA update CLI for Expo — push signed JS bundles to any EdgeOTA server",
   "license": "MIT",
   "author": "EdgeOTA Contributors",
-  "homepage": "https://ota.renbo.site",
+  "homepage": "https://ota.renbo.dev",
   "publishConfig": {
     "access": "public"
   },

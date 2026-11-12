@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://ota.renbo.site">
+  <a href="https://ota.renbo.dev">
     <img src="https://raw.githubusercontent.com/renbostudios/edge-ota/main/assets/banner-hero.png" alt="EdgeOTA — Zero-SDK OTA Engine for Expo" width="100%">
   </a>
 </p>
@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <a href="https://ota.renbo.site"><strong>Cloud Console</strong></a> · 
-  <a href="https://ota.renbo.site/docs"><strong>Documentation</strong></a> · 
+  <a href="https://ota.renbo.dev"><strong>Cloud Console</strong></a> · 
+  <a href="https://ota.renbo.dev/docs"><strong>Documentation</strong></a> · 
   <a href="#video-walkthrough"><strong>Video Walkthrough</strong></a> · 
   <a href="https://www.npmjs.com/package/@renbostudios/edge-ota"><strong>npm Package</strong></a> · 
   <a href="https://github.com/renbostudios/edge-ota/issues"><strong>Report Issue</strong></a>
@@ -37,7 +37,7 @@
 - **Hardware-Grade Code Signing**: Every Hermes bundle is signed locally using ECDSA P-256 (`prime256v1`). Your private key is stored securely in `~/.config/edge-ota/keys/` and never leaves your machine.
 - **Multi-Runtime Matrix Updates**: Target multiple native app versions simultaneously in a single command (`--runtime 1.0.0,1.0.1,1.0.2`).
 - **100% Protocol v1 Compliant**: Produces standard RFC multipart/mixed manifests and Structured Field Values (`SFV`) signature headers expected by Expo clients.
-- **True Open-Core & Self-Hostable**: Deploy on your own Cloudflare account (`apps/worker-oss`) or Docker VPS (`apps/server-node`), or connect directly to the hosted cloud at [ota.renbo.site](https://ota.renbo.site).
+- **True Open-Core & Self-Hostable**: Deploy on your own Cloudflare account (`apps/worker-oss`) or Docker VPS (`apps/server-node`), or connect directly to the hosted cloud at [ota.renbo.dev](https://ota.renbo.dev).
 
 ---
 
@@ -194,7 +194,7 @@ edge-ota push --skip-export --channel production
 {
   "expo": {
     "updates": {
-      "url": "https://ota.renbo.site/api/projects/<projectId>/updates",
+      "url": "https://ota.renbo.dev/api/projects/<projectId>/updates",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 30000,
       "requestHeaders": {
@@ -203,7 +203,7 @@ edge-ota push --skip-export --channel production
     },
     "runtimeVersion": "1.0.0",
     "extra": {
-      "edgeOtaServer": "https://ota.renbo.site",
+      "edgeOtaServer": "https://ota.renbo.dev",
       "edgeOtaPublicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...\n-----END PUBLIC KEY-----"
     }
   }

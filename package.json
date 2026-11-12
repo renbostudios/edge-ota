@@ -2,7 +2,7 @@
   "name": "edge-ota",
   "private": true,
   "description": "Zero-SDK, self-hostable OTA update platform for Expo — CLI, Server, and Worker",
-  "homepage": "https://ota.renbo.site",
+  "homepage": "https://ota.renbo.dev",
   "repository": {
     "type": "git",
     "url": "https://github.com/renbostudios/edge-ota.git"

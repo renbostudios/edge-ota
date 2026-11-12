@@ -5,7 +5,7 @@
   "description": "Core manifest, crypto, and OTA protocol utilities for EdgeOTA",
   "license": "MIT",
   "author": "EdgeOTA Contributors",
-  "homepage": "https://ota.renbo.site",
+  "homepage": "https://ota.renbo.dev",
   "publishConfig": {
     "access": "public"
   },
