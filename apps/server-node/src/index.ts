@@ -352,22 +352,21 @@ async function storeOtp(email: string, code: string): Promise<void> {
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString(); // 10 minutes
   await runCommand(
     "INSERT INTO otps (id, email, code, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
-    [otpId, email, code, expiresAt, now.toISOString()]
+    [otpId, email, hashPassword(code), expiresAt, now.toISOString()]
   );
 }
 
 async function verifyOtp(email: string, code: string): Promise<boolean> {
-  const otp = await queryOne(
-    "SELECT * FROM otps WHERE email = ? AND code = ?",
-    [email, code]
-  );
+  const otp = await queryOne("SELECT * FROM otps WHERE email = ?", [email]);
   if (!otp) return false;
   const expiresAt = new Date(otp.expires_at).getTime();
   if (Date.now() > expiresAt) {
     await runCommand("DELETE FROM otps WHERE id = ?", [otp.id]);
     return false;
   }
-  // OTP valid — delete it (single-use)
+  if (!verifyPassword(code, String(otp.code))) return false;
+
+  // One-time use: burn the code after a successful verification.
   await runCommand("DELETE FROM otps WHERE id = ?", [otp.id]);
   return true;
 }
@@ -550,30 +549,52 @@ if (logsCount === 0) {
 }
 
 const app = express();
-app.use(express.json());
+// nginx terminates TLS and forwards the real client address. Trust only the
+// loopback/docker ranges so X-Forwarded-For cannot be spoofed by clients.
+app.set("trust proxy", ["loopback", "linklocal", "uniquelocal"]);
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+});
+app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  // Cap the entire multipart body, not just each file: an authenticated
+  // account must not be able to fill the disk with one request.
+  const contentLength = Number(req.headers["content-length"] || 0);
+  if (Number.isFinite(contentLength) && contentLength > 512 * 1024 * 1024) {
+    res.status(413).send("Payload too large (max 512 MB per request)");
+    return;
+  }
+  next();
+});
 
-// CORS config middleware
+// CORS config middleware — exact origins only. Matching on suffix
+// (".renbo.dev") would trust any subdomain, including a compromised one.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : [];
-  
-  if (
-    origin && (
-      origin.startsWith("http://localhost:") ||
-      origin.startsWith("http://127.0.0.1:") ||
-      // Current domain (primary)
-      origin.endsWith(".renbo.dev") ||
-      origin === "https://renbo.dev" ||
-      // Legacy domain — kept during the ota.renbo.site migration so existing
-      // dashboards/CLI sessions never hit a CORS wall.
-      origin.endsWith(".renbo.site") ||
-      origin === "https://renbo.site" ||
-      allowedOrigins.includes(origin)
-    )
-  ) {
+  const configuredOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+    : [];
+
+  const productionOrigins = [
+    "https://ota.renbo.dev",
+    "https://www.ota.renbo.dev",
+    "https://ota.renbo.site",
+    "https://www.ota.renbo.site",
+  ];
+
+  const isLocalDevOrigin =
+    process.env.NODE_ENV !== "production" &&
+    typeof origin === "string" &&
+    /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+
+  if (origin && (configuredOrigins.includes(origin) || productionOrigins.includes(origin) || isLocalDevOrigin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+    res.setHeader("Vary", "Origin");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, expo-platform, expo-runtime-version, expo-channel-name, x-project-id");
@@ -585,7 +606,15 @@ app.use((req, res, next) => {
   next();
 });
 
-const upload = multer({ dest: UPLOADS_DIR });
+const upload = multer({
+  dest: UPLOADS_DIR,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100 MB per file
+    files: 500,
+    fields: 20,
+    fieldSize: 5 * 1024 * 1024,
+  },
+});
 
 // Middleware to authenticate sessions
 async function authenticateSession(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -605,11 +634,35 @@ async function authenticateSession(req: express.Request, res: express.Response, 
         res.status(401).send("Unauthorized: Invalid deploy key");
         return;
       }
+
+      const keyScope = keyRow.scope || "push_updates";
+      if (!["push_updates", "deploy"].includes(keyScope)) {
+        res.status(403).send("Forbidden: this API key cannot publish updates");
+        return;
+      }
+
+      // Deploy keys must not be usable as console sessions. They may read
+      // project metadata and publish updates/assets, nothing else.
+      const requestPath = req.path;
+      const keyAllowed =
+        (req.method === "GET" &&
+          ["/api/projects", "/api/releases", "/api/channels", "/api/auth/me"].includes(requestPath)) ||
+        (req.method === "POST" &&
+          (requestPath === "/api/updates" ||
+            requestPath === "/api/assets/upload" ||
+            /^\/api\/projects\/[^/]+\/updates$/.test(requestPath)));
+
+      if (!keyAllowed) {
+        res.status(403).send("Forbidden: API keys can only publish updates");
+        return;
+      }
+
       (req as any).user = { id: keyRow.user_id };
+      (req as any).auth = { type: "api_key", scope: keyScope, keyId: keyRow.id };
       return next();
     }
 
-    const session = await queryOne("SELECT * FROM sessions WHERE token = ?", [token]);
+    const session = await queryOne("SELECT * FROM sessions WHERE token = ?", [hashSessionToken(token)]);
     if (!session) {
       res.status(401).send("Unauthorized: Invalid session");
       return;
@@ -617,7 +670,7 @@ async function authenticateSession(req: express.Request, res: express.Response, 
 
     const expiresAt = new Date(session.expires_at).getTime();
     if (Date.now() > expiresAt) {
-      await runCommand("DELETE FROM sessions WHERE token = ?", [token]);
+      await runCommand("DELETE FROM sessions WHERE token = ?", [session.token]);
       res.status(401).send("Unauthorized: Session expired");
       return;
     }
@@ -630,6 +683,7 @@ async function authenticateSession(req: express.Request, res: express.Response, 
     }
 
     (req as any).user = { id: session.user_id };
+    (req as any).auth = { type: "session" };
     next();
   } catch (err) {
     res.status(500).send("Internal Server Error");
@@ -654,6 +708,10 @@ async function getValidatedProjectId(req: express.Request): Promise<string> {
     if (proj) {
       return proj.id;
     }
+
+    // Explicit project the caller cannot access: never silently fall back to
+    // another project — that would act on the wrong tenant.
+    return "00000000-0000-0000-0000-000000000000";
   }
   
   const user = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
@@ -672,8 +730,38 @@ async function getValidatedProjectId(req: express.Request): Promise<string> {
   return "00000000-0000-0000-0000-000000000000";
 }
 
-// Session TTL: 90 days
-const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+// True when the caller may mutate a project: the owner, or an accepted
+// team member with the developer/owner role. Viewers are read-only.
+async function canWriteProject(req: express.Request, projectId: string): Promise<boolean> {
+  const userId = (req as any).user?.id;
+  if (
+    !userId ||
+    !projectId ||
+    projectId === "00000000-0000-0000-0000-000000000000"
+  ) {
+    return false;
+  }
+
+  const project = await queryOne("SELECT user_id FROM projects WHERE id = ?", [projectId]);
+  if (!project) return false;
+  if (project.user_id === userId) return true;
+
+  const user = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+  const member = await queryOne(
+    "SELECT id FROM team_members WHERE project_id = ? AND email = ? AND status = 'accepted' AND role IN ('developer', 'owner')",
+    [projectId, user?.email || ""]
+  );
+  return Boolean(member);
+}
+
+// Session TTL: 30 days
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Only a hash of the session token is stored, so a database leak cannot be
+// replayed as a live console session.
+function hashSessionToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 // Authentication API Endpoints
 app.post("/api/auth/signup", async (req, res) => {
@@ -758,6 +846,11 @@ app.post("/api/auth/login", async (req, res) => {
       return;
     }
 
+    // Upgrade legacy unsalted SHA-256 hashes to scrypt on successful login.
+    if (typeof user.password_hash === "string" && user.password_hash.length === 64 && !user.password_hash.includes(":")) {
+      await runCommand("UPDATE users SET password_hash = ? WHERE id = ?", [hashPassword(password), user.id]);
+    }
+
     // Check if email is verified
     if (user.email_verified === 0) {
       // Rate limit OTP resends: 1 per email per 2 minutes
@@ -775,7 +868,7 @@ app.post("/api/auth/login", async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
 
-    await runCommand("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [token, user.id, new Date().toISOString(), expiresAt]);
+    await runCommand("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [hashSessionToken(token), user.id, new Date().toISOString(), expiresAt]);
 
     res.json({ token, email: user.email });
   } catch (err) {
@@ -787,7 +880,7 @@ app.post("/api/auth/logout", async (req, res) => {
   const authHeader = req.headers["authorization"];
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
-    await runCommand("DELETE FROM sessions WHERE token = ?", [token]);
+    await runCommand("DELETE FROM sessions WHERE token = ?", [hashSessionToken(token)]);
   }
   res.status(200).send("Logged out");
 });
@@ -839,7 +932,7 @@ app.post("/api/auth/verify-otp", async (req, res) => {
 
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-    await runCommand("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [token, user.id, new Date().toISOString(), expiresAt]);
+    await runCommand("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [hashSessionToken(token), user.id, new Date().toISOString(), expiresAt]);
 
     res.json({ token, email: user.email, verified: true });
   } catch (err) {
@@ -898,7 +991,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     return;
   }
 
-  const ip = (req.headers["x-forwarded-for"] as string) || req.ip || "127.0.0.1";
+  const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
   if (!checkRateLimit(`forgot-pwd-ip:${ip}`, 10, 15 * 60 * 1000) || !checkRateLimit(`forgot-pwd:${email}`, 3, 10 * 60 * 1000)) {
     res.status(429).send("Too many password reset requests. Please wait a few minutes.");
     return;
@@ -1054,9 +1147,13 @@ app.get("/api/billing/status", authenticateSession, async (req, res) => {
 app.post("/api/billing/upgrade", authenticateSession, async (req, res) => {
   try {
     const projectId = await getValidatedProjectId(req);
-    const project = await queryOne("SELECT id, name FROM projects WHERE id = ?", [projectId]);
+    const project = await queryOne("SELECT id, name, user_id FROM projects WHERE id = ?", [projectId]);
     if (!project) {
       res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (project.user_id !== (req as any).user.id) {
+      res.status(403).json({ error: "Only the project owner can change the plan" });
       return;
     }
 
@@ -1087,12 +1184,26 @@ app.post("/api/billing/upgrade", authenticateSession, async (req, res) => {
 
 app.post("/api/projects", authenticateSession, async (req, res) => {
   const { name, publicKey } = req.body;
-  if (!name) {
-    res.status(400).send("Project name is required");
+  if (!name || typeof name !== "string" || name.length > 100) {
+    res.status(400).send("Project name is required (max 100 characters)");
+    return;
+  }
+  if (publicKey !== undefined && (typeof publicKey !== "string" || publicKey.length > 4096)) {
+    res.status(400).send("Invalid public key");
+    return;
+  }
+  if (!checkRateLimit(`project-create:${(req as any).user.id}`, 5, 60 * 60 * 1000)) {
+    res.status(429).send("Too many projects created. Please try again later.");
     return;
   }
 
   try {
+    const owned = await queryOne("SELECT COUNT(*) as count FROM projects WHERE user_id = ?", [(req as any).user.id]);
+    if (owned && parseInt(owned.count) >= 20) {
+      res.status(400).send("Project limit reached");
+      return;
+    }
+
     const projectId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     await runCommand(
@@ -1183,6 +1294,12 @@ app.get("/api/releases", authenticateSession, async (req, res) => {
 app.post("/api/releases/:id/rollback", authenticateSession, async (req, res) => {
   const { id } = req.params;
   const projectId = await getValidatedProjectId(req);
+
+  if (!(await canWriteProject(req, projectId))) {
+    res.status(403).send("Forbidden: view-only team members cannot roll back releases");
+    return;
+  }
+
   try {
     const target = await queryOne("SELECT * FROM updates WHERE id = ? AND project_id = ?", [id, projectId]);
     if (!target) {
@@ -1318,6 +1435,16 @@ app.post("/api/channels", authenticateSession, async (req, res) => {
     return;
   }
 
+  if (!(await canWriteProject(req, projectId))) {
+    res.status(403).send("Forbidden: view-only team members cannot create channels");
+    return;
+  }
+
+  if (typeof id !== "string" || !/^[a-zA-Z0-9._-]{1,64}$/.test(id)) {
+    res.status(400).send("Invalid channel ID");
+    return;
+  }
+
   const channelId = id.toLowerCase().replace(/\s+/g, "-");
 
   try {
@@ -1358,6 +1485,11 @@ app.put("/api/channels/:id", authenticateSession, async (req, res) => {
   const { rollout, runtime, active_release_id, target_platform, status, env } = req.body;
   const projectId = await getValidatedProjectId(req);
 
+  if (!(await canWriteProject(req, projectId))) {
+    res.status(403).send("Forbidden: view-only team members cannot change channels");
+    return;
+  }
+
   try {
     const channel = await queryOne("SELECT id FROM channels WHERE id = ? AND project_id = ?", [id, projectId]);
     if (!channel) {
@@ -1365,15 +1497,35 @@ app.put("/api/channels/:id", authenticateSession, async (req, res) => {
       return;
     }
 
+    const rolloutNum = rollout !== undefined ? Number(rollout) : 100;
+    if (!Number.isFinite(rolloutNum) || rolloutNum < 0 || rolloutNum > 100) {
+      res.status(400).send("Invalid rollout percentage");
+      return;
+    }
+
+    const platformValue = target_platform !== undefined ? String(target_platform).toLowerCase() : "all";
+    if (!["all", "ios", "android", "web"].includes(platformValue)) {
+      res.status(400).send("Invalid target_platform");
+      return;
+    }
+
+    if (active_release_id) {
+      const release = await queryOne("SELECT id FROM updates WHERE id = ? AND project_id = ?", [active_release_id, projectId]);
+      if (!release) {
+        res.status(400).send("active_release_id does not belong to this project");
+        return;
+      }
+    }
+
     await runCommand(
       "UPDATE channels SET rollout = ?, runtime = ?, active_release_id = ?, target_platform = ?, status = ?, env = ? WHERE id = ? AND project_id = ?",
       [
-        rollout !== undefined ? rollout : 100,
-        runtime !== undefined ? runtime : "",
+        rolloutNum,
+        runtime !== undefined ? String(runtime).slice(0, 64) : "",
         active_release_id !== undefined ? active_release_id : "",
-        target_platform !== undefined ? target_platform : "all",
-        status !== undefined ? status : "Active",
-        env !== undefined ? env : "Production",
+        platformValue,
+        status !== undefined ? String(status).slice(0, 32) : "Active",
+        env !== undefined ? String(env).slice(0, 64) : "Production",
         id,
         projectId
       ]
@@ -1478,10 +1630,12 @@ app.get("/api/keys", authenticateSession, async (req, res) => {
 
 app.post("/api/keys", authenticateSession, async (req, res) => {
   const { label, scope } = req.body;
-  if (!label) {
-    res.status(400).send("Key label is required");
+  if (!label || typeof label !== "string" || label.length > 100) {
+    res.status(400).send("Key label is required (max 100 characters)");
     return;
   }
+
+  const keyScope = ["push_updates", "deploy"].includes(scope) ? scope : "push_updates";
 
   try {
     const userId = (req as any).user.id;
@@ -1493,12 +1647,12 @@ app.post("/api/keys", authenticateSession, async (req, res) => {
 
     await runCommand(
       "INSERT INTO api_keys (id, user_id, label, prefix, secret_hash, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [keyId, userId, label, prefix, secretHash, scope || "push_updates", createdAt]
+      [keyId, userId, label, prefix, secretHash, keyScope, createdAt]
     );
 
     queryOne("SELECT email FROM users WHERE id = ?", [userId]).then(user => {
       if (user?.email) {
-        sendApiKeyAlertEmail(user.email, "created", label, prefix, scope || "push_updates").catch(err => console.error("[Email] API key created alert failed:", err));
+        sendApiKeyAlertEmail(user.email, "created", label, prefix, keyScope).catch(err => console.error("[Email] API key created alert failed:", err));
       }
     }).catch(() => {});
 
@@ -1506,7 +1660,7 @@ app.post("/api/keys", authenticateSession, async (req, res) => {
       id: keyId,
       label,
       prefix,
-      scope: scope || "push_updates",
+      scope: keyScope,
       created_at: createdAt,
       key: token
     });
@@ -1581,6 +1735,20 @@ app.post("/api/team/invite", authenticateSession, async (req, res) => {
   }
 
   try {
+    const project = await queryOne("SELECT user_id FROM projects WHERE id = ?", [projectId]);
+    const isOwner = project?.user_id === userId;
+    if (!isOwner) {
+      const inviter = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+      const membership = await queryOne(
+        "SELECT id FROM team_members WHERE project_id = ? AND email = ? AND status = 'accepted' AND role IN ('developer', 'owner')",
+        [projectId, inviter?.email || ""]
+      );
+      if (!membership) {
+        res.status(403).send("Forbidden: only the project owner or a developer can invite");
+        return;
+      }
+    }
+
     const { ownerEmail, projectName, teamCc } = await getProjectRecipients(projectId);
     if (ownerEmail && email.toLowerCase() === ownerEmail.toLowerCase()) {
       res.status(400).send("This user is already the project owner");
@@ -1738,6 +1906,9 @@ app.post("/api/team/accept-invite", async (req, res) => {
         res.status(401).send("Invalid password for existing account");
         return;
       }
+      if (typeof user.password_hash === "string" && user.password_hash.length === 64 && !user.password_hash.includes(":")) {
+        await runCommand("UPDATE users SET password_hash = ? WHERE id = ?", [hashPassword(password), user.id]);
+      }
       if (user.email_verified === 0) {
         await runCommand("UPDATE users SET email_verified = 1 WHERE id = ?", [user.id]);
       }
@@ -1754,7 +1925,7 @@ app.post("/api/team/accept-invite", async (req, res) => {
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
     await runCommand(
       "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-      [sessionToken, user.id, new Date().toISOString(), expiresAt]
+      [hashSessionToken(sessionToken), user.id, new Date().toISOString(), expiresAt]
     );
 
     const { ownerEmail, projectName, teamCc } = await getProjectRecipients(invite.project_id);
@@ -1787,6 +1958,11 @@ app.post("/api/team/members/:id/resend", authenticateSession, async (req, res) =
   const { id } = req.params;
   const projectId = await getValidatedProjectId(req);
   const userId = (req as any).user.id;
+
+  if (!(await canWriteProject(req, projectId))) {
+    res.status(403).send("Forbidden: view-only team members cannot manage invitations");
+    return;
+  }
 
   if (!checkRateLimit(`invite-resend:${id}`, 1, 2 * 60 * 1000)) {
     res.status(429).send("Please wait 2 minutes before resending this invitation.");
@@ -1831,6 +2007,11 @@ app.delete("/api/team/members/:id", authenticateSession, async (req, res) => {
   const { id } = req.params;
   const projectId = await getValidatedProjectId(req);
   const userId = (req as any).user.id;
+
+  if (!(await canWriteProject(req, projectId))) {
+    res.status(403).send("Forbidden: view-only team members cannot manage the team");
+    return;
+  }
 
   try {
     const project = await queryOne("SELECT user_id FROM projects WHERE id = ?", [projectId]);
@@ -1906,7 +2087,7 @@ const handleGetUpdates = async (req: express.Request, res: express.Response) => 
     return;
   }
 
-  const ip = (req.headers["x-forwarded-for"] as string) || req.ip || req.socket.remoteAddress || "127.0.0.1";
+  const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
   const fatalError = req.headers["expo-fatal-error"] as string;
   const currentUpdateId = req.headers["expo-current-update-id"] as string;
   const embeddedUpdateId = req.headers["expo-embedded-update-id"] as string;
@@ -2146,7 +2327,7 @@ async function pruneOldReleases(projectId: string, keepLimit = 10): Promise<void
 }
 
 app.get("/api/updates", (req, res) => {
-  const ip = (req.headers["x-forwarded-for"] as string) || req.ip || req.socket.remoteAddress || "127.0.0.1";
+  const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
   if (!checkRateLimit(`ota:${ip}`, 120, 60 * 1000)) {
     res.status(429).send("Too many requests");
     return;
@@ -2154,7 +2335,7 @@ app.get("/api/updates", (req, res) => {
   handleGetUpdates(req, res);
 });
 app.get("/api/projects/:projectId/updates", (req, res) => {
-  const ip = (req.headers["x-forwarded-for"] as string) || req.ip || req.socket.remoteAddress || "127.0.0.1";
+  const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
   if (!checkRateLimit(`ota:${ip}`, 120, 60 * 1000)) {
     res.status(429).send("Too many requests");
     return;
@@ -2163,8 +2344,16 @@ app.get("/api/projects/:projectId/updates", (req, res) => {
 });
 
 const handlePostUpdates = async (req: express.Request, res: express.Response) => {
-  const projectId = req.params.projectId || (req.headers["x-project-id"] as string) || (req.query.projectId as string) || "default-project";
   try {
+    const userId = (req as any).user?.id as string;
+    const auth = (req as any).auth || { type: "session" };
+
+    // Publishing is rate limited per account.
+    if (!checkRateLimit(`publish:${userId}`, 30, 60 * 1000)) {
+      res.status(429).send("Too many publish attempts. Please try again later.");
+      return;
+    }
+
     const file = req.file;
     const { payload: payloadString, signature, platform } = req.body;
 
@@ -2185,6 +2374,20 @@ const handlePostUpdates = async (req: express.Request, res: express.Response) =>
       publicKey?:       string;
     };
 
+    // ── Validate every value that reaches the filesystem or a DB id ────────
+    if (typeof payload.bundleHash !== "string" || !/^[a-f0-9]{64}$/i.test(payload.bundleHash)) {
+      res.status(400).send("Invalid bundleHash: expected a 64-character SHA-256 hex digest");
+      return;
+    }
+    if (typeof payload.channel !== "string" || !/^[a-zA-Z0-9._-]{1,64}$/.test(payload.channel)) {
+      res.status(400).send("Invalid channel name");
+      return;
+    }
+    if (typeof signature !== "string" || signature.length < 32 || signature.length > 4096) {
+      res.status(400).send("Invalid signature");
+      return;
+    }
+
     // Multi-Runtime Hotfix Matrix support: handle single or comma-separated or array of runtimes
     const rawRuntime = payload.runtimeVersions || payload.runtimeVersion;
     let runtimes: string[] = [];
@@ -2194,55 +2397,93 @@ const handlePostUpdates = async (req: express.Request, res: express.Response) =>
       runtimes = rawRuntime.split(",").map(r => r.trim()).filter(Boolean);
     }
 
-    if (runtimes.length === 0) {
-      res.status(400).send("Invalid runtimeVersion: at least one runtime version is required.");
+    if (runtimes.length === 0 || runtimes.some((r) => !/^[a-zA-Z0-9._-]{1,32}$/.test(r))) {
+      res.status(400).send("Invalid runtimeVersion: at least one valid runtime version is required.");
       return;
     }
 
-    // ── Verify the ECDSA signature ───────────────────────────────────────────
-    let verifyPublicKey = PUBLIC_KEY;
-    if (projectId && projectId !== "default-project") {
-      const project = await queryOne("SELECT * FROM projects WHERE id = ?", [projectId]);
-      if (!project) {
-        res.status(404).send("Project not found");
-        return;
-      }
-      if (project.user_id !== (req as any).user.id) {
-        const user = await queryOne("SELECT email FROM users WHERE id = ?", [(req as any).user.id]);
-        const member = await queryOne(
-          "SELECT id FROM team_members WHERE project_id = ? AND email = ? AND status = 'accepted' AND role IN ('developer', 'owner')",
-          [projectId, user?.email || ""]
-        );
-        if (!member) {
-          res.status(403).send("Forbidden: You do not have permission to push updates to this project");
-          return;
-        }
-      }
+    // ── Resolve and authorise the project (no default-project bypass) ──────
+    const requestedProjectId =
+      req.params.projectId || (req.headers["x-project-id"] as string) || (req.query.projectId as string) || null;
 
-      // Safe public key registration: only set if project currently has no key registered
-      let currentPublicKey = project.public_key;
-      if (!currentPublicKey && payload.publicKey) {
-        await runCommand("UPDATE projects SET public_key = ? WHERE id = ?", [payload.publicKey, projectId]);
-        currentPublicKey = payload.publicKey;
-        console.log(`[OTA] Initialized ECDSA public key for project "${projectId}"`);
-      }
-
-      verifyPublicKey = currentPublicKey || PUBLIC_KEY;
+    const projectId = requestedProjectId || (await getValidatedProjectId(req));
+    const project = await queryOne("SELECT * FROM projects WHERE id = ?", [projectId]);
+    if (!project) {
+      res.status(404).send("Project not found");
+      return;
     }
 
-    if (verifyPublicKey) {
-      const isValid = await verifyPayload(payloadString, signature, verifyPublicKey);
-      if (!isValid) {
-        console.warn("[OTA] Upload rejected: invalid ECDSA signature");
-        res.status(401).send("Invalid signature — ECDSA verification failed");
+    const isOwner = project.user_id === userId;
+    if (!isOwner) {
+      const user = await queryOne("SELECT email FROM users WHERE id = ?", [userId]);
+      const member = await queryOne(
+        "SELECT id FROM team_members WHERE project_id = ? AND email = ? AND status = 'accepted' AND role IN ('developer', 'owner')",
+        [projectId, user?.email || ""]
+      );
+      if (!member) {
+        res.status(403).send("Forbidden: you do not have permission to push updates to this project");
         return;
       }
-    } else {
-      console.warn("[OTA] ⚠️  No public key configured for signature verification — skipped (dev/fallback mode)");
     }
 
-    const updatePlatform = (platform as string) || payload.platform || "all";
-    const bundleHash = payload.bundleHash;
+    // ── The uploaded file must match the signed payload ────────────────────
+    const bundleHash = payload.bundleHash.toLowerCase();
+    const actualHash = await new Promise<string>((resolve, reject) => {
+      const hash = crypto.createHash("sha256");
+      const stream = fs.createReadStream(file.path);
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("end", () => resolve(hash.digest("hex")));
+      stream.on("error", reject);
+    });
+
+    if (actualHash !== bundleHash) {
+      fs.unlinkSync(file.path);
+      res.status(400).send("Bundle hash mismatch: file content does not match the signed payload");
+      return;
+    }
+
+    // ── Signature verification (fail closed) ───────────────────────────────
+    let verifyPublicKey = project.public_key || (projectId === "default-project" ? PUBLIC_KEY : "");
+
+    if (!verifyPublicKey) {
+      // A deploy key must never be able to register or replace the trust anchor.
+      const canRegisterKey =
+        isOwner &&
+        auth.type === "session" &&
+        typeof payload.publicKey === "string" &&
+        payload.publicKey.includes("BEGIN PUBLIC KEY") &&
+        payload.publicKey.length <= 4096;
+
+      if (!canRegisterKey) {
+        fs.unlinkSync(file.path);
+        res.status(400).send("Project has no signing public key. Add one in project settings before publishing.");
+        return;
+      }
+
+      await runCommand("UPDATE projects SET public_key = ? WHERE id = ?", [payload.publicKey, projectId]);
+      verifyPublicKey = payload.publicKey;
+      console.log(`[OTA] Registered ECDSA public key for project "${projectId}"`);
+    }
+
+    const isValid = await verifyPayload(payloadString, signature, verifyPublicKey);
+    if (!isValid) {
+      fs.unlinkSync(file.path);
+      console.warn("[OTA] Upload rejected: invalid ECDSA signature");
+      res.status(401).send("Invalid signature — ECDSA verification failed");
+      return;
+    }
+
+    const updatePlatform = ["ios", "android", "all", "web"].includes(String(platform || payload.platform || "all").toLowerCase())
+      ? String(platform || payload.platform || "all").toLowerCase()
+      : "all";
+
+    // Only keep well-formed asset hashes in metadata; they become client URLs.
+    if (Array.isArray(payload.assets)) {
+      payload.assets = payload.assets.filter(
+        (a) => a && typeof a.hash === "string" && /^[a-f0-9]{64}$/i.test(a.hash)
+      );
+    }
+
     const bundleDestPath = path.join(UPLOADS_DIR, bundleHash);
 
     if (!fs.existsSync(bundleDestPath)) {
@@ -2344,9 +2585,8 @@ const handlePostUpdates = async (req: express.Request, res: express.Response) =>
       createdAt
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal Server Error";
     console.error("[OTA] Upload error:", error);
-    res.status(500).send(message);
+    res.status(500).send("Internal Server Error");
   }
 };
 
@@ -2356,6 +2596,12 @@ app.post("/api/projects/:projectId/updates", authenticateSession, upload.single(
 // ── Asset Upload Endpoint ───────────────────────────────────────────────────
 app.post("/api/assets/upload", authenticateSession, upload.array("assets"), async (req, res) => {
   try {
+    const userId = (req as any).user.id;
+    if (!checkRateLimit(`asset-upload:${userId}`, 20, 60 * 1000)) {
+      res.status(429).send("Too many asset uploads. Please try again later.");
+      return;
+    }
+
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
       res.status(400).send("No asset files provided");
@@ -2479,6 +2725,10 @@ app.get("/api/assets/:hash", (req, res) => {
     "application/javascript";
 
   res.setHeader("Content-Type", contentType);
+  if (ext === ".svg") {
+    // An uploaded SVG can execute script; never let it run in the API origin.
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  }
   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
   res.setHeader("ETag", `"${rawHash}"`);
   fs.createReadStream(targetPath).pipe(res);
