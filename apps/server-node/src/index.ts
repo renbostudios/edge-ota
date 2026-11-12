@@ -421,7 +421,14 @@ function isValidEmail(email: string): boolean {
 
 // Seed admin user — always mark as verified so admin can log in
 const adminEmail = process.env.ADMIN_EMAIL || "admin@edge-ota.local";
-const adminPassword = process.env.ADMIN_PASSWORD || "password123";
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (!adminPassword || adminPassword.length < 16) {
+  console.error(
+    "[Security] ADMIN_PASSWORD must be set to at least 16 characters. " +
+      "Refusing to start with a default or weak admin password."
+  );
+  process.exit(1);
+}
 const adminPasswordHash = hashPassword(adminPassword);
 
 let adminUserId = crypto.randomUUID();

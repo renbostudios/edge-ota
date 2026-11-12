@@ -6,7 +6,7 @@ services:
     container_name: edge-ota-backend
     restart: always
     ports:
-      - "3020:3000" # Map host port 3020 to container port 3000
+      - "127.0.0.1:3020:3000" # Localhost only; nginx proxies api.ota.renbo.site
     env_file:
       - .env
     environment:
